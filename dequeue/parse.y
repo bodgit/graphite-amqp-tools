@@ -75,10 +75,10 @@ struct binding	*init_binding(void);
 #define YYSTYPE_IS_DECLARED 1
 typedef struct {
 	union {
-		int64_t			 number;
-		char			*string;
-		//struct ntp_addr_wrap	*addr;
-		struct opts		 opts;
+		int64_t				 number;
+		char				*string;
+		struct dequeue_addr_wrap	*addr;
+		struct opts			 opts;
 	} v;
 	int lineno;
 } YYSTYPE;
@@ -90,7 +90,7 @@ typedef struct {
 %token	EXCHANGE TYPE FEDERATED
 %token	QUEUE MIRRORED TTL
 %token	BINDING
-%token	METRICSOURCE
+%token	METRICLOCATION
 %token	PORT
 %token	ERROR
 %token	<v.string>		STRING
@@ -117,57 +117,86 @@ grammar		: /* empty */
 		;
 
 main		: GRAPHITE address graphite_opts	{
-			conf->graphite_port = opts.port;
+			struct graphite_addr	*ga;
+			struct dequeue_addr	*h, *next;
+
+			if ((h = $2->a) == NULL &&
+			    (host_dns($2->name, &h) == -1 || !h)) {
+				yyerror("could not resolve \"%s\"", $2->name);
+				free($2->name);
+				free($2);
+				YYERROR;
+			}
+
+			for (; h != NULL; h = next) {
+				next = h->next;
+				ga = calloc(1, sizeof(struct graphite_addr));
+				if (ga == NULL)
+					fatal("graphite calloc");
+				ga->fd = -1;
+				ga->port =
+				    (opts.port) ? opts.port : GRAPHITE_DEFAULT_PORT;
+				memcpy(&ga->sa, &h->ss,
+				    sizeof(struct sockaddr_storage));
+				TAILQ_INSERT_TAIL(&conf->graphite_addrs, ga,
+				    entry);
+				free(h);
+			}
+			free($2->name);
+			free($2);
 		}
-		| AMQP address amqp_opts		{
-			conf->amqp_port = opts.port;
+		| AMQP STRING amqp_opts			{
+			conf->amqp->host = $2;
+			conf->amqp->port = opts.port;
 
-			if (conf->vhost)
-				free(conf->vhost);
-			conf->vhost = (opts.vhost) ? opts.vhost : NULL;
+			if (conf->amqp->vhost)
+				free(conf->amqp->vhost);
+			conf->amqp->vhost = (opts.vhost) ? opts.vhost : NULL;
 
-			if (conf->user)
-				free(conf->user);
-			conf->user = (opts.user) ? opts.user : NULL;
+			if (conf->amqp->user)
+				free(conf->amqp->user);
+			conf->amqp->user = (opts.user) ? opts.user : NULL;
 
-			if (conf->password)
-				free(conf->password);
-			conf->password = (opts.password) ? opts.password : NULL;
+			if (conf->amqp->password)
+				free(conf->amqp->password);
+			conf->amqp->password = (opts.password) ? opts.password : NULL;
 		}
 		| EXCHANGE STRING exchange_opts		{
-			if (conf->exchange)
-				free(conf->exchange);
-			conf->exchange = $2;
+			if (conf->amqp->exchange)
+				free(conf->amqp->exchange);
+			conf->amqp->exchange = $2;
 
-			if (conf->type)
-				free(conf->type);
-			conf->type = (opts.type) ? opts.type : NULL;
+			if (conf->amqp->type)
+				free(conf->amqp->type);
+			conf->amqp->type = (opts.type) ? opts.type : NULL;
 
-			if (conf->upstreams)
-				free(conf->upstreams);
-			conf->upstreams = (opts.upstreams) ? opts.upstreams : NULL;
+			if (conf->amqp->upstreams)
+				free(conf->amqp->upstreams);
+			conf->amqp->upstreams = (opts.upstreams) ? opts.upstreams : NULL;
 		}
 		| QUEUE STRING queue_opts		{
-			if (conf->queue)
-				free(conf->queue);
-			conf->queue = $2;
-			conf->flags &= ~DEQUEUE_FLAG_MIRRORED_QUEUE;
-			conf->flags |= opts.flags;
-			conf->ttl = opts.ttl;
+			if (conf->amqp->queue)
+				free(conf->amqp->queue);
+			conf->amqp->queue = $2;
+			conf->amqp->flags &= ~AMQP_FLAG_MIRRORED_QUEUE;
+			conf->amqp->flags |= opts.flags;
+			conf->amqp->ttl = opts.ttl;
 		}
 		| BINDING STRING			{
 			if ((b = init_binding()) == NULL)
 				fatal(NULL);
 			b->key = $2;
-			LIST_INSERT_HEAD(&conf->bindings, b, entry);
+			LIST_INSERT_HEAD(&conf->amqp->bindings, b, entry);
 		}
-		| METRICSOURCE STRING			{
+		| METRICLOCATION STRING			{
 			if (!strcmp($2, "message"))
-				conf->flags |= DEQUEUE_FLAG_METRIC_IN_MESSAGE;
+				conf->amqp->flags |=
+				    AMQP_FLAG_METRIC_IN_MESSAGE;
 			else if (!strcmp($2, "key"))
-				conf->flags &= ~DEQUEUE_FLAG_METRIC_IN_MESSAGE;
+				conf->amqp->flags &=
+				    ~AMQP_FLAG_METRIC_IN_MESSAGE;
 			else {
-				yyerror("unknown metric source");
+				yyerror("unknown metric location");
 				free($2);
 				YYERROR;
 			}
@@ -287,7 +316,7 @@ main		: GRAPHITE address graphite_opts	{
 */
 
 address		: STRING		{
-			/*if (($$ = calloc(1, sizeof(struct ntp_addr_wrap))) ==
+			if (($$ = calloc(1, sizeof(struct dequeue_addr_wrap))) ==
 			    NULL)
 				fatal(NULL);
 			if (host($1, &$$->a) == -1) {
@@ -297,7 +326,7 @@ address		: STRING		{
 				free($$);
 				YYERROR;
 			}
-			$$->name = $1;*/
+			$$->name = $1;
 		}
 		;
 
@@ -351,7 +380,7 @@ queue_opt	: mirrored
 		;
 
 port		: PORT NUMBER {
-			if ($2 < 1 || $2 > USHRT_MAX) {
+			if ($2 < 0 || $2 > USHRT_MAX) {
 				yyerror("invalid port number");
 				YYERROR;
 			}
@@ -392,7 +421,7 @@ federated	: FEDERATED STRING {
 		;
 
 mirrored	: MIRRORED {
-			opts.flags |= DEQUEUE_FLAG_MIRRORED_QUEUE;
+			opts.flags |= AMQP_FLAG_MIRRORED_QUEUE;
 		}
 		;
 
@@ -459,7 +488,7 @@ lookup(char *s)
 		{ "exchange",		EXCHANGE},
 		{ "federated",		FEDERATED},
 		{ "graphite",		GRAPHITE},
-		{ "metric-source",	METRICSOURCE},
+		{ "metric-location",	METRICLOCATION},
 		{ "mirrored",		MIRRORED},
 		{ "password",		PASSWORD},
 		{ "port",		PORT},
@@ -744,7 +773,12 @@ parse_config(const char *filename, int flags)
 		return (NULL);
 	}
 
-	LIST_INIT(&conf->bindings);
+	if ((conf->amqp = amqp_init()) == NULL) {
+		log_warn("cannot allocate memory");
+		return (NULL);
+	}
+
+	TAILQ_INIT(&conf->graphite_addrs);
 
 	if ((file = pushfile(filename)) == NULL) {
 		free(conf);
@@ -766,53 +800,185 @@ parse_config(const char *filename, int flags)
 
 	/* Graphite */
 	//if (conf->graphite_host)
-	if (conf->graphite_port == 0)
-		conf->graphite_port = GRAPHITE_DEFAULT_PORT;
+	//if (conf->graphite_port == 0)
+	//	conf->graphite_port = GRAPHITE_DEFAULT_PORT;
 
 	/* AMQP host/login */
-	//if (conf->amqp_host)
-	if (conf->amqp_port == 0)
-		conf->amqp_port = AMQP_DEFAULT_PORT;
-	if (conf->vhost == NULL)
-		if ((conf->vhost = strdup(AMQP_DEFAULT_VHOST)) == NULL)
+	if (conf->amqp->host == NULL)
+		if ((conf->amqp->host = strdup(AMQP_DEFAULT_HOST)) == NULL)
 			fatal("strdup");
-	if (conf->user == NULL)
-		if ((conf->user = strdup(AMQP_DEFAULT_USER)) == NULL)
+	if (conf->amqp->port == 0)
+		conf->amqp->port = AMQP_DEFAULT_PORT;
+	if (conf->amqp->vhost == NULL)
+		if ((conf->amqp->vhost = strdup(AMQP_DEFAULT_VHOST)) == NULL)
 			fatal("strdup");
-	if (conf->password == NULL)
-		if ((conf->password = strdup(AMQP_DEFAULT_PASSWORD)) == NULL)
+	if (conf->amqp->user == NULL)
+		if ((conf->amqp->user = strdup(AMQP_DEFAULT_USER)) == NULL)
+			fatal("strdup");
+	if (conf->amqp->password == NULL)
+		if ((conf->amqp->password = strdup(AMQP_DEFAULT_PASSWORD)) == NULL)
 			fatal("strdup");
 
 	/* AMQP exchange */
-	if (conf->exchange == NULL)
-		if ((conf->exchange = strdup(AMQP_DEFAULT_EXCHANGE)) == NULL)
+	if (conf->amqp->exchange == NULL)
+		if ((conf->amqp->exchange = strdup(AMQP_DEFAULT_EXCHANGE)) == NULL)
 			fatal("strdup");
-	if (conf->type == NULL)
-		if ((conf->type = strdup(AMQP_DEFAULT_EXCHANGE_TYPE)) == NULL)
+	if (conf->amqp->type == NULL)
+		if ((conf->amqp->type = strdup(AMQP_DEFAULT_EXCHANGE_TYPE)) == NULL)
 			fatal("strdup");
 
 	/* AMQP queue */
-	if (conf->queue == NULL)
-		if ((conf->queue = strdup(AMQP_DEFAULT_QUEUE)) == NULL)
+	if (conf->amqp->queue == NULL)
+		if ((conf->amqp->queue = strdup(AMQP_DEFAULT_QUEUE)) == NULL)
 			fatal("strdup");
 
 	/* AMQP exchange to queue bindings (ignore fanout exchanges) */
-	if (LIST_EMPTY(&conf->bindings) &&
-	    strcmp(conf->type, AMQP_EXCHANGE_TYPE_FANOUT)) {
+	if (LIST_EMPTY(&conf->amqp->bindings) &&
+	    strcmp(conf->amqp->type, AMQP_EXCHANGE_TYPE_FANOUT)) {
 		if ((b = init_binding()) == NULL)
 			fatal(NULL);
 		if ((b->key = strdup(
-		    (strcmp(conf->type, AMQP_EXCHANGE_TYPE_FANOUT) == 0) ?
-		    AMQP_DEFAULT_BINDING_FANOUT :
+		    (strcmp(conf->amqp->type, AMQP_EXCHANGE_TYPE_TOPIC) == 0) ?
+		    AMQP_DEFAULT_BINDING_TOPIC :
 		    AMQP_DEFAULT_BINDING_DIRECT)) == NULL)
 			fatal("strdup");
-		LIST_INSERT_HEAD(&conf->bindings, b, entry);
+		LIST_INSERT_HEAD(&conf->amqp->bindings, b, entry);
 	}
 
 	/* Only topic exchanges can handle the metric key as the routing key */
-	if (strcmp(conf->type, AMQP_EXCHANGE_TYPE_TOPIC) &&
-	    !(conf->flags & DEQUEUE_FLAG_METRIC_IN_MESSAGE))
+	if (strcmp(conf->amqp->type, AMQP_EXCHANGE_TYPE_TOPIC) &&
+	    !(conf->amqp->flags & AMQP_FLAG_METRIC_IN_MESSAGE))
 		fatalx("metric key must be in message with non-topic exchange");
 
 	return (conf);
+}
+
+struct dequeue_addr	*host_v4(const char *);
+struct dequeue_addr	*host_v6(const char *);
+
+int
+host(const char *s, struct dequeue_addr **hn)
+{
+	struct dequeue_addr *h = NULL;
+
+	if (!strcmp(s, "*"))
+		if ((h = calloc(1, sizeof(struct dequeue_addr))) == NULL)
+			fatal(NULL);
+
+	/* IPv4 address? */
+	if (h == NULL)
+		h = host_v4(s);
+
+	/* IPv6 address? */
+	if (h == NULL)
+		h = host_v6(s);
+
+	if (h == NULL)
+		return (0);
+
+	*hn = h;
+
+	return (1);
+}
+
+struct dequeue_addr *
+host_v4(const char *s)
+{
+	struct in_addr		 ina;
+	struct sockaddr_in	*sa_in;
+	struct dequeue_addr	*h;
+
+	bzero(&ina, sizeof(struct in_addr));
+	if (inet_pton(AF_INET, s, &ina) != 1)
+		return (NULL);
+
+	if ((h = calloc(1, sizeof(struct dequeue_addr))) == NULL)
+		fatal(NULL);
+	sa_in = (struct sockaddr_in *)&h->ss;
+	sa_in->sin_len = sizeof(struct sockaddr_in);
+	sa_in->sin_family = AF_INET;
+	sa_in->sin_addr.s_addr = ina.s_addr;
+
+	return (h);
+}
+
+struct dequeue_addr *
+host_v6(const char *s)
+{
+	struct addrinfo		 hints, *res;
+	struct sockaddr_in6	*sa_in6;
+	struct dequeue_addr	*h = NULL;
+
+	bzero(&hints, sizeof(hints));
+	hints.ai_family = AF_INET6;
+	hints.ai_socktype = SOCK_DGRAM;	/* DUMMY */
+	hints.ai_flags = AI_NUMERICHOST;
+	if (getaddrinfo(s, "0", &hints, &res) == 0) {
+		if ((h = calloc(1, sizeof(struct dequeue_addr))) == NULL)
+			fatal(NULL);
+		sa_in6 = (struct sockaddr_in6 *)&h->ss;
+		sa_in6->sin6_len = sizeof(struct sockaddr_in6);
+		sa_in6->sin6_family = AF_INET6;
+		memcpy(&sa_in6->sin6_addr,
+		    &((struct sockaddr_in6 *)res->ai_addr)->sin6_addr,
+		    sizeof(sa_in6->sin6_addr));
+		sa_in6->sin6_scope_id =
+		    ((struct sockaddr_in6 *)res->ai_addr)->sin6_scope_id;
+
+		freeaddrinfo(res);
+	}
+
+	return (h);
+}
+
+#define	MAX_SERVERS_DNS	8
+
+int
+host_dns(const char *s, struct dequeue_addr **hn)
+{
+	struct addrinfo		 hints, *res0, *res;
+	int			 error, cnt = 0;
+	struct sockaddr_in	*sa_in;
+	struct sockaddr_in6	*sa_in6;
+	struct dequeue_addr	*h, *hh = NULL;
+
+	bzero(&hints, sizeof(hints));
+	hints.ai_family = PF_UNSPEC;
+	hints.ai_socktype = SOCK_DGRAM;	/* DUMMY */
+	error = getaddrinfo(s, NULL, &hints, &res0);
+	if (error == EAI_AGAIN || error == EAI_NODATA || error == EAI_NONAME)
+		return (0);
+	if (error) {
+		log_warnx("could not parse \"%s\": %s", s,
+		    gai_strerror(error));
+		return (-1);
+	}
+
+	for (res = res0; res && cnt < MAX_SERVERS_DNS; res = res->ai_next) {
+		if (res->ai_family != AF_INET &&
+		    res->ai_family != AF_INET6)
+			continue;
+		if ((h = calloc(1, sizeof(struct dequeue_addr))) == NULL)
+			fatal(NULL);
+		h->ss.ss_family = res->ai_family;
+		if (res->ai_family == AF_INET) {
+			sa_in = (struct sockaddr_in *)&h->ss;
+			sa_in->sin_len = sizeof(struct sockaddr_in);
+			sa_in->sin_addr.s_addr = ((struct sockaddr_in *)
+			    res->ai_addr)->sin_addr.s_addr;
+		} else {
+			sa_in6 = (struct sockaddr_in6 *)&h->ss;
+			sa_in6->sin6_len = sizeof(struct sockaddr_in6);
+			memcpy(&sa_in6->sin6_addr, &((struct sockaddr_in6 *)
+			    res->ai_addr)->sin6_addr, sizeof(struct in6_addr));
+		}
+
+		h->next = hh;
+		hh = h;
+		cnt++;
+	}
+	freeaddrinfo(res0);
+
+	*hn = hh;
+	return (cnt);
 }

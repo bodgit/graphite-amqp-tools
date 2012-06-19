@@ -17,7 +17,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <amqp.h>
+
 #include "common.h"
+
+int	 amqp_log_error(int);
+int	 amqp_log_amqp_error(amqp_rpc_reply_t);
 
 int
 amqp_log_error(int r)
@@ -79,15 +84,27 @@ amqp_log_amqp_error(amqp_rpc_reply_t r)
 	return (-1);
 }
 
-int
-amqp_open(struct dequeue *env)
+struct amqp *
+amqp_init(void)
 {
-	int			 fd;
+	struct amqp	*env;
+
+	if ((env = calloc(1, sizeof(struct amqp))) == NULL)
+		return (NULL);
+
+	LIST_INIT(&env->bindings);
+
+	return (env);
+}
+
+int
+amqp_open(struct amqp *env)
+{
+	int	 fd;
 
 	/* Create a connection, log in and create the (only) channel */
 	env->c = amqp_new_connection();
-	if (amqp_log_error(fd = amqp_open_socket(AMQP_DEFAULT_HOST,
-	    env->amqp_port)) != 0)
+	if (amqp_log_error(fd = amqp_open_socket(env->host, env->port)) != 0)
 		goto bad;
 	amqp_set_sockfd(env->c, fd);
 	if (amqp_log_amqp_error(amqp_login(env->c, env->vhost, 0, 131072, 0,
@@ -103,7 +120,7 @@ bad:
 }
 
 int
-amqp_exchange(struct dequeue *env)
+amqp_exchange(struct amqp *env)
 {
 	amqp_table_entry_t	 e[2];
 	amqp_table_t		 t;
@@ -142,7 +159,7 @@ bad:
 }
 
 int
-amqp_queue(struct dequeue *env)
+amqp_queue(struct amqp *env)
 {
 	amqp_table_entry_t	 e[2];
 	amqp_table_t		 t;
@@ -151,7 +168,7 @@ amqp_queue(struct dequeue *env)
 
 	/* Declare the queue */
 	i = 0;
-	if (env->flags & DEQUEUE_FLAG_MIRRORED_QUEUE) {
+	if (env->flags & AMQP_FLAG_MIRRORED_QUEUE) {
 		/* Support RabbitMQ extension for HA mirrored queues across
 		 * clusters, currently only mirroring across all nodes is
 		 * implemented
@@ -210,8 +227,74 @@ bad:
 	return (-1);
 }
 
+int
+amqp_consume(struct amqp *env, char **key, char **buf, size_t *len)
+{
+	amqp_frame_t		 f;
+	amqp_basic_deliver_t	*d;
+	int			 r;
+	size_t			 l;
+
+	amqp_maybe_release_buffers(env->c);
+	if (((r = amqp_simple_wait_frame(env->c, &f)) < 0) ||
+	    (f.frame_type != AMQP_FRAME_METHOD) ||
+	    (f.payload.method.id != AMQP_BASIC_DELIVER_METHOD))
+		return (-1);
+	d = (amqp_basic_deliver_t *)f.payload.method.decoded;
+
+#if 0
+	log_debug("delivery %u, exchange %.*s, routing key %.*s",
+	    d->delivery_tag,
+	    (int)d->exchange.len, (char *)d->exchange.bytes,
+	    (int)d->routing_key.len, (char *)d->routing_key.bytes);
+#endif
+
+	/* Add on an extra byte to null-terminate the string */
+	if ((*key = calloc(1, d->routing_key.len + 1)) == NULL)
+		fatal("amqp_consume");
+	memcpy(*key, d->routing_key.bytes, d->routing_key.len);
+
+	if (((r = amqp_simple_wait_frame(env->c, &f)) < 0) ||
+	    (f.frame_type != AMQP_FRAME_HEADER)) {
+		free(*key);
+		return (-1);
+	}
+	*len = f.payload.properties.body_size;
+
+	/* Add on an extra byte to null-terminate the string */
+	if ((*buf = calloc(1, *len + 1)) == NULL)
+		fatal("amqp_consume");
+
+	l = 0;
+	while (l < *len) {
+		if (((r = amqp_simple_wait_frame(env->c, &f)) < 0) ||
+		    (f.frame_type != AMQP_FRAME_BODY)) {
+			free(*key);
+			free(*buf);
+			return (-1);
+		}
+		memcpy(*buf + l, f.payload.body_fragment.bytes,
+		    f.payload.body_fragment.len);
+		l += f.payload.body_fragment.len;
+	}
+
+	/* XXX What happens when this wraps? */
+	return (d->delivery_tag);
+}
+
 void
-amqp_close(struct dequeue *env)
+amqp_acknowledge(struct amqp *env, int tag)
+{
+	amqp_basic_ack(env->c, AMQP_DEFAULT_CHANNEL, tag, 0);
+}
+
+void
+amqp_reject(struct amqp *env, int tag, int requeue)
+{
+}
+
+void
+amqp_close(struct amqp *env)
 {
 	amqp_log_amqp_error(amqp_channel_close(env->c, AMQP_DEFAULT_CHANNEL,
 	    AMQP_REPLY_SUCCESS));

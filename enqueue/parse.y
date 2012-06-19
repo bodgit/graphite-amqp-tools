@@ -33,7 +33,7 @@
 #include <string.h>
 #include <syslog.h>
 
-#include "graphite-enqueue.h"
+#include "enqueue.h"
 
 TAILQ_HEAD(files, file)		 files = TAILQ_HEAD_INITIALIZER(files);
 static struct file {
@@ -54,22 +54,27 @@ int		 lgetc(int);
 int		 lungetc(int);
 int		 findeol(void);
 
-//struct ntpd_conf		*conf;
+struct enqueue		*conf;
 
-struct amqp_opts {
-	int	 port;
-	char	*vhost;
-	char	*user;
-	char	*password;
-} amqp_opts;
-void		amqp_opts_default(void);
+struct opts {
+	int		 port;
+	char		*vhost;
+	char		*user;
+	char		*password;
+	char		*type;
+	char		*upstreams;
+	int		 flags;
+} opts;
+void		 opts_default(void);
 
+/* FIXME */
+#define YYSTYPE_IS_DECLARED 1
 typedef struct {
 	union {
-		int64_t			 number;
-		char			*string;
-		struct ntp_addr_wrap	*addr;
-		struct amqp_opts	 opts;
+		int64_t				 number;
+		char				*string;
+		struct enqueue_addr_wrap	*addr;
+		struct opts			 opts;
 	} v;
 	int lineno;
 } YYSTYPE;
@@ -77,14 +82,18 @@ typedef struct {
 %}
 
 %token	LISTEN ON
-%token	PORT AMQP VHOST USER PASSWORD EXCHANGE TYPE FEDERATED METRICSOURCE
+%token	AMQP VHOST USER PASSWORD
+%token	EXCHANGE TYPE FEDERATED
+%token	METRICLOCATION
+%token	ROUTINGKEY
+%token	PORT
 %token	ERROR
 %token	<v.string>		STRING
 %token	<v.number>		NUMBER
 %type	<v.addr>		address
-%type	<v.opts>		listen_opts listen_opts_l listen_opt
 %type	<v.opts>		amqp_opts amqp_opts_l amqp_opt
 %type	<v.opts>		exchange_opts exchange_opts_l exchange_opt
+%type	<v.opts>		listen_opts listen_opts_l listen_opt
 %type	<v.opts>		port
 %type	<v.opts>		vhost
 %type	<v.opts>		user
@@ -101,7 +110,7 @@ grammar		: /* empty */
 
 main		: LISTEN ON address listen_opts	{
 			struct listen_addr	*la;
-			struct ntp_addr		*h, *next;
+			struct enqueue_addr	*h, *next;
 
 			if ((h = $3->a) == NULL &&
 			    (host_dns($3->name, &h) == -1 || !h)) {
@@ -117,6 +126,8 @@ main		: LISTEN ON address listen_opts	{
 				if (la == NULL)
 					fatal("listen on calloc");
 				la->fd = -1;
+				la->port =
+				    (opts.port) ? opts.port : GRAPHITE_DEFAULT_PORT;
 				memcpy(&la->sa, &h->ss,
 				    sizeof(struct sockaddr_storage));
 				TAILQ_INSERT_TAIL(&conf->listen_addrs, la,
@@ -126,75 +137,58 @@ main		: LISTEN ON address listen_opts	{
 			free($3->name);
 			free($3);
 		}
-		| AMQP address amqp_opts	{
-			struct ntp_peer		*p;
-			struct ntp_addr		*h, *next;
+		| AMQP STRING amqp_opts	{
+			conf->amqp->host = $2;
+			conf->amqp->port = opts.port;
 
-			h = $2->a;
-			do {
-				if (h != NULL) {
-					next = h->next;
-					if (h->ss.ss_family != AF_INET &&
-					    h->ss.ss_family != AF_INET6) {
-						yyerror("IPv4 or IPv6 address "
-						    "or hostname expected");
-						free(h);
-						free($2->name);
-						free($2);
-						YYERROR;
-					}
-					h->next = NULL;
-				} else
-					next = NULL;
+			if (conf->amqp->vhost)
+				free(conf->amqp->vhost);
+			conf->amqp->vhost = (opts.vhost) ? opts.vhost : NULL;
 
-				p = new_peer();
-				p->weight = $3.weight;
-				p->rtable = $3.rtable;
-				p->addr = h;
-				p->addr_head.a = h;
-				p->addr_head.pool = 1;
-				p->addr_head.name = strdup($2->name);
-				if (p->addr_head.name == NULL)
-					fatal(NULL);
-				if (p->addr != NULL)
-					p->state = STATE_DNS_DONE;
-				if (!(p->rtable > 0 && p->addr &&
-				    p->addr->ss.ss_family != AF_INET))
-					TAILQ_INSERT_TAIL(&conf->ntp_peers,
-					    p, entry);
-				h = next;
-			} while (h != NULL);
+			if (conf->amqp->user)
+				free(conf->amqp->user);
+			conf->amqp->user = (opts.user) ? opts.user : NULL;
 
-			free($2->name);
-			free($2);
+			if (conf->amqp->password)
+				free(conf->amqp->password);
+			conf->amqp->password = (opts.password) ? opts.password : NULL;
 		}
 		| EXCHANGE STRING exchange_opts	{
+			if (conf->amqp->exchange)
+				free(conf->amqp->exchange);
+			conf->amqp->exchange = $2;
+
+			if (conf->amqp->type)
+				free(conf->amqp->type);
+			conf->amqp->type = (opts.type) ? opts.type : NULL;
+
+			if (conf->amqp->upstreams)
+				free(conf->amqp->upstreams);
+			conf->amqp->upstreams = (opts.upstreams) ? opts.upstreams : NULL;
 		}
-		| METRICSOURCE STRING		{
+		| METRICLOCATION STRING		{
 			if (!strcmp($2, "message"))
+				conf->amqp->flags |=
+				    AMQP_FLAG_METRIC_IN_MESSAGE;
 			else if (!strcmp($2, "key"))
+				conf->amqp->flags &=
+				    ~AMQP_FLAG_METRIC_IN_MESSAGE;
 			else {
-				yyerror("unknown metric-source");
+				yyerror("unknown metric location");
 				free($2);
 				YYERROR;
 			}
 			free($2);
 		}
-		;
-/*		| SENSOR STRING	sensor_opts {
-			struct ntp_conf_sensor	*s;
-
-			s = new_sensor($2);
-			s->weight = $3.weight;
-			s->correction = $3.correction;
-			s->refstr = $3.refstr;
-			free($2);
-			TAILQ_INSERT_TAIL(&conf->ntp_conf_sensors, s, entry);
+		| ROUTINGKEY STRING		{
+			if (conf->amqp->key)
+				free(conf->amqp->exchange);
+			conf->amqp->key = $2;
 		}
-		;*/
+		;
 
 address		: STRING		{
-			if (($$ = calloc(1, sizeof(struct ntp_addr_wrap))) ==
+			if (($$ = calloc(1, sizeof(struct enqueue_addr_wrap))) ==
 			    NULL)
 				fatal(NULL);
 			if (host($1, &$$->a) == -1) {
@@ -208,17 +202,6 @@ address		: STRING		{
 		}
 		;
 
-listen_opts	:	{ opts_default(); }
-		  listen_opts_l
-			{ $$ = opts; }
-		|	{ opts_default(); $$ = opts; }
-		;
-listen_opts_l	: listen_opts_l listen_opt
-		| listen_opt
-		;
-listen_opt	: port
-		;
-
 amqp_opts	:	{ opts_default(); }
 		  amqp_opts_l
 			{ $$ = opts; }
@@ -227,10 +210,10 @@ amqp_opts	:	{ opts_default(); }
 amqp_opts_l	: amqp_opts_l amqp_opt
 		| amqp_opt
 		;
-amqp_opt	: amqp_port
-		| amqp_vhost
-		| amqp_user
-		| amqp_password
+amqp_opt	: port
+		| vhost
+		| user
+		| password
 		;
 
 exchange_opts	:	{ opts_default(); }
@@ -245,57 +228,64 @@ exchange_opt	: type
 		| federated
 		;
 
-amqp_port	: PORT NUMBER {
-			if ($2 < 1 || $2 > USHRT_MAX) {
-				yyerror("port must be between 1 and 65535");
+listen_opts	:	{ opts_default(); }
+		  listen_opts_l
+			{ $$ = opts; }
+		|	{ opts_default(); $$ = opts; }
+		;
+listen_opts_l	: listen_opts_l listen_opt
+		| listen_opt
+		;
+listen_opt	: port
+		;
+
+port		: PORT NUMBER {
+			if ($2 < 0 || $2 > USHRT_MAX) {
+				yyerror("invalid port number");
 				YYERROR;
 			}
-			conf->amqp_port = $2;
+			opts.port = $2;
 		}
 		;
 
-amqp_vhost	: VHOST STRING {
-			conf->amqp_vhost = $2;
+vhost		: VHOST STRING {
+			opts.vhost = $2;
 		}
 		;
 
-amqp_user	: USER STRING {
-			conf->amqp_user = $2;
+user		: USER STRING {
+			opts.user = $2;
 		}
 		;
 
-amqp_password	: PASSWORD STRING {
-			conf->amqp_password = $2;
+password	: PASSWORD STRING {
+			opts.password = $2;
 		}
 		;
 
 type		: TYPE STRING {
-			if (strcmp($2, "direct") && strcmp($2, "fanout") &&
-			    strcmp($2, "topic")) {
-				yyerror("unknown exchange type");
+			if (strcmp($2, AMQP_EXCHANGE_TYPE_TOPIC) &&
+			    strcmp($2, AMQP_EXCHANGE_TYPE_DIRECT) &&
+			    strcmp($2, AMQP_EXCHANGE_TYPE_FANOUT)) {
+				yyerror("invalid exchange type");
 				free($2);
 				YYERROR;
 			}
-			conf->amqp_type = $2;
+			opts.type = $2;
 		}
 		;
 
 federated	: FEDERATED STRING {
-			conf->flags |= AMQP_FLAGS_FEDERATED;
-			conf->federated = $2;
+			opts.upstreams = $2;
 		}
 		;
 
 %%
 
 void
-amqp_opts_default(void)
+opts_default(void)
 {
-	bzero(&amqp_opts, sizeof amqp_opts);
-	opts.port = AMQP_DEFAULT_PORT;
-	opts.vhost = AMQP_DEFAULT_VHOST;
-	opts.user = AMQP_DEFAULT_USER;
-	opts.password = AMQP_DEFAULT_PASSWORD;
+	bzero(&opts, sizeof opts);
 }
 
 struct keywords {
@@ -333,12 +323,12 @@ lookup(char *s)
 		{ "amqp",		AMQP},
 		{ "exchange",		EXCHANGE},
 		{ "federated",		FEDERATED},
-		{ "in",			IN},
 		{ "listen",		LISTEN},
-		{ "metric-source",	METRICSOURCE},
+		{ "metric-location",	METRICLOCATION},
 		{ "on",			ON},
 		{ "password",		PASSWORD},
 		{ "port",		PORT},
+		{ "routing-key",	ROUTINGKEY},
 		{ "type",		TYPE},
 		{ "user",		USER},
 		{ "vhost",		VHOST}
@@ -608,18 +598,26 @@ popfile(void)
 	return (file ? 0 : EOF);
 }
 
-int
-parse_config(const char *filename, struct ntpd_conf *xconf)
+struct enqueue *
+parse_config(const char *filename, int flags)
 {
 	int		 errors = 0;
 
-	conf = xconf;
+	if ((conf = calloc(1, sizeof(*conf))) == NULL) {
+		log_warn("cannot allocate memory");
+		return (NULL);
+	}
+
+	if ((conf->amqp = amqp_init()) == NULL) {
+		log_warn("cannot allocate memory");
+		return (NULL);
+	}
+
 	TAILQ_INIT(&conf->listen_addrs);
-	TAILQ_INIT(&conf->ntp_peers);
-	TAILQ_INIT(&conf->ntp_conf_sensors);
 
 	if ((file = pushfile(filename)) == NULL) {
-		return (-1);
+		free(conf);
+		return (NULL);
 	}
 	topfile = file;
 
@@ -627,5 +625,175 @@ parse_config(const char *filename, struct ntpd_conf *xconf)
 	errors = file->errors;
 	popfile();
 
-	return (errors ? -1 : 0);
+	if (errors) {
+		free(conf);
+		return (NULL);
+	}
+
+	/* Fill in the gaps with well-defined defaults
+	 */
+
+	/* AMQP host/login */
+	if (conf->amqp->host == NULL)
+		if ((conf->amqp->host = strdup(AMQP_DEFAULT_HOST)) == NULL)
+			fatal("strdup");
+	if (conf->amqp->port == 0)
+		conf->amqp->port = AMQP_DEFAULT_PORT;
+	if (conf->amqp->vhost == NULL)
+		if ((conf->amqp->vhost = strdup(AMQP_DEFAULT_VHOST)) == NULL)
+			fatal("strdup");
+	if (conf->amqp->user == NULL)
+		if ((conf->amqp->user = strdup(AMQP_DEFAULT_USER)) == NULL)
+			fatal("strdup");
+	if (conf->amqp->password == NULL)
+		if ((conf->amqp->password = strdup(AMQP_DEFAULT_PASSWORD)) == NULL)
+			fatal("strdup");
+
+	/* AMQP exchange */
+	if (conf->amqp->exchange == NULL)
+		if ((conf->amqp->exchange = strdup(AMQP_DEFAULT_EXCHANGE)) == NULL)
+			fatal("strdup");
+	if (conf->amqp->type == NULL)
+		if ((conf->amqp->type = strdup(AMQP_DEFAULT_EXCHANGE_TYPE)) == NULL)
+			fatal("strdup");
+
+	/* Only topic exchanges can handle the metric key as the routing key */
+	if (strcmp(conf->amqp->type, AMQP_EXCHANGE_TYPE_TOPIC) &&
+	    !(conf->amqp->flags & AMQP_FLAG_METRIC_IN_MESSAGE))
+		fatalx("metric key must be in message with non-topic exchange");
+	if (conf->amqp->key == NULL)
+		if ((conf->amqp->key = strdup(AMQP_DEFAULT_BINDING_DIRECT)) == NULL)
+			fatal("strdup");
+
+	return (conf);
+}
+
+struct enqueue_addr	*host_v4(const char *);
+struct enqueue_addr	*host_v6(const char *);
+
+int
+host(const char *s, struct enqueue_addr **hn)
+{
+	struct enqueue_addr *h = NULL;
+
+	if (!strcmp(s, "*"))
+		if ((h = calloc(1, sizeof(struct enqueue_addr))) == NULL)
+			fatal(NULL);
+
+	/* IPv4 address? */
+	if (h == NULL)
+		h = host_v4(s);
+
+	/* IPv6 address? */
+	if (h == NULL)
+		h = host_v6(s);
+
+	if (h == NULL)
+		return (0);
+
+	*hn = h;
+
+	return (1);
+}
+
+struct enqueue_addr *
+host_v4(const char *s)
+{
+	struct in_addr		 ina;
+	struct sockaddr_in	*sa_in;
+	struct enqueue_addr	*h;
+
+	bzero(&ina, sizeof(struct in_addr));
+	if (inet_pton(AF_INET, s, &ina) != 1)
+		return (NULL);
+
+	if ((h = calloc(1, sizeof(struct enqueue_addr))) == NULL)
+		fatal(NULL);
+	sa_in = (struct sockaddr_in *)&h->ss;
+	sa_in->sin_len = sizeof(struct sockaddr_in);
+	sa_in->sin_family = AF_INET;
+	sa_in->sin_addr.s_addr = ina.s_addr;
+
+	return (h);
+}
+
+struct enqueue_addr *
+host_v6(const char *s)
+{
+	struct addrinfo		 hints, *res;
+	struct sockaddr_in6	*sa_in6;
+	struct enqueue_addr	*h = NULL;
+
+	bzero(&hints, sizeof(hints));
+	hints.ai_family = AF_INET6;
+	hints.ai_socktype = SOCK_DGRAM;	/* DUMMY */
+	hints.ai_flags = AI_NUMERICHOST;
+	if (getaddrinfo(s, "0", &hints, &res) == 0) {
+		if ((h = calloc(1, sizeof(struct enqueue_addr))) == NULL)
+			fatal(NULL);
+		sa_in6 = (struct sockaddr_in6 *)&h->ss;
+		sa_in6->sin6_len = sizeof(struct sockaddr_in6);
+		sa_in6->sin6_family = AF_INET6;
+		memcpy(&sa_in6->sin6_addr,
+		    &((struct sockaddr_in6 *)res->ai_addr)->sin6_addr,
+		    sizeof(sa_in6->sin6_addr));
+		sa_in6->sin6_scope_id =
+		    ((struct sockaddr_in6 *)res->ai_addr)->sin6_scope_id;
+
+		freeaddrinfo(res);
+	}
+
+	return (h);
+}
+
+#define	MAX_SERVERS_DNS	8
+
+int
+host_dns(const char *s, struct enqueue_addr **hn)
+{
+	struct addrinfo		 hints, *res0, *res;
+	int			 error, cnt = 0;
+	struct sockaddr_in	*sa_in;
+	struct sockaddr_in6	*sa_in6;
+	struct enqueue_addr	*h, *hh = NULL;
+
+	bzero(&hints, sizeof(hints));
+	hints.ai_family = PF_UNSPEC;
+	hints.ai_socktype = SOCK_DGRAM;	/* DUMMY */
+	error = getaddrinfo(s, NULL, &hints, &res0);
+	if (error == EAI_AGAIN || error == EAI_NODATA || error == EAI_NONAME)
+		return (0);
+	if (error) {
+		log_warnx("could not parse \"%s\": %s", s,
+		    gai_strerror(error));
+		return (-1);
+	}
+
+	for (res = res0; res && cnt < MAX_SERVERS_DNS; res = res->ai_next) {
+		if (res->ai_family != AF_INET &&
+		    res->ai_family != AF_INET6)
+			continue;
+		if ((h = calloc(1, sizeof(struct enqueue_addr))) == NULL)
+			fatal(NULL);
+		h->ss.ss_family = res->ai_family;
+		if (res->ai_family == AF_INET) {
+			sa_in = (struct sockaddr_in *)&h->ss;
+			sa_in->sin_len = sizeof(struct sockaddr_in);
+			sa_in->sin_addr.s_addr = ((struct sockaddr_in *)
+			    res->ai_addr)->sin_addr.s_addr;
+		} else {
+			sa_in6 = (struct sockaddr_in6 *)&h->ss;
+			sa_in6->sin6_len = sizeof(struct sockaddr_in6);
+			memcpy(&sa_in6->sin6_addr, &((struct sockaddr_in6 *)
+			    res->ai_addr)->sin6_addr, sizeof(struct in6_addr));
+		}
+
+		h->next = hh;
+		hh = h;
+		cnt++;
+	}
+	freeaddrinfo(res0);
+
+	*hn = hh;
+	return (cnt);
 }

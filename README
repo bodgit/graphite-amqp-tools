@@ -1,9 +1,11 @@
-Basically gluing libevent2 and librabbitmq together to make the following pair
-of daemons that should be efficient, have low memory usage, and not fall over
-at the faintest whiff of some new AMQP feature:
+Basically wrapping librabbitmq/rabbitmq-c with some code to make the
+following pair of daemons that should be reasonably efficient, have low
+memory usage, and not fall over at the faintest whiff of some new AMQP
+feature:
 
 graphite-enqueue - provides the graphite TCP line receiver protocol and
                    forwards all received messages on to a given AMQP exchange.
+                   Uses libevent2 to handle multiple clients simultaneously.
                    Supports using the metric name as the routing key or using
                    an arbitrary routing key and keeping the metric name in the
                    message payload.

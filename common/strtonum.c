@@ -17,7 +17,7 @@
 
 /* OPENBSD ORIGINAL: lib/libc/stdlib/strtonum.c */
 
-#include "dequeue.h"
+#include "common.h"
 
 #ifndef HAVE_STRTONUM
 #include <stdlib.h>

@@ -1,0 +1,176 @@
+.\" Copyright (c) 2012 Matt Dainty <matt@bodgit-n-scarper.com>
+.\"
+.\" Permission to use, copy, modify, and distribute this software for any
+.\" purpose with or without fee is hereby granted, provided that the above
+.\" copyright notice and this permission notice appear in all copies.
+.\"
+.\" THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+.\" WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+.\" MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+.\" ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+.\" WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+.\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+.\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+.\"
+.Dd $Mdocdate$
+.Dt GRAPHITE-DEQUEUE.CONF 5
+.Os
+.Sh NAME
+.Nm graphite-dequeue.conf
+.Nd graphite-dequeue daemon configuration file
+.Sh DESCRIPTION
+.Nm
+is the configuration file for the
+.Xr graphite-dequeue 8
+daemon.
+.Sh SECTIONS
+The
+.Nm
+file only has one section:
+.Bl -tag -width xxxx
+.It Sy Global Configuration
+Global runtime settings for
+.Xr graphite-dequeue 8
+.El
+.Pp
+Comments can be put anywhere in the file using a hash mark
+.Pq Sq # ,
+and extend to the end of the current line.
+.Sh GLOBAL CONFIGURATION
+The following options can be set globally:
+.Pp
+.Bl -tag -width Ds -compact
+.It Xo
+.Ic graphite Ar address
+.Op Ic port Ar number
+.Xc
+Specify the destination Graphite server.
+Use the
+.Ic port
+option to override the default port.
+The destination must use the
+.Sq TCP line receiver
+protocol.
+.Pp
+.It Xo
+.Ic amqp Ar address
+.Op Ic port Ar number
+.Op Ic vhost Ar string
+.Op Ic user Ar string
+.Op Ic password Ar string
+.Xc
+Specify the source AMQP server.
+Use the
+.Ic port , Ic vhost , Ic user
+and
+.Ic password
+options to override the AMQP defaults.
+.Pp
+.It Xo
+.Ic exchange Ar string
+.Op Ic type Pq Ic topic Ns | Ns Ic direct Ns | Ns Ic fanout
+.Op Ic federated Ar upstreams
+.Xc
+Specify the
+.Ar exchange
+that will be created.
+The
+.Ic type
+option can be used to set the type of exchange created.
+If the
+.Ic federated
+option is used, the type of exchange created is actually
+.Sq Ar x-federation
+and the additional arguments
+.Sq Ar upstream-set
+and
+.Sq Ar type
+are passed set to the
+.Ar upstreams
+argument which refers to a set of upstream servers along with the original
+exchange type respectively.
+.Pp
+.It Xo
+.Ic queue Ar string
+.Op Ic mirrored
+.Op Ic ttl Ar milliseconds
+.Xc
+Specify the
+.Ar queue
+that will be created and bound to the exchange.
+Adding the
+.Ic mirrored
+option will pass the
+.Sq Ar x-ha-policy
+argument which means the queue will be created across all nodes in a cluster.
+Adding the
+.Ic ttl
+option will pass the
+.Sq Ar x-message-ttl
+argument which expires any unread messages in the queue after
+.Ar milliseconds .
+.Pp
+.It Xo
+.Ic binding Ar routing-key
+.Xc
+Specify a
+.Ar routing-key
+to bind the queue to the exchange.
+When a
+.Ic topic
+exchange is used, the default is to use the wildcard
+.Pq Sq # .
+With a
+.Ic direct
+exchange, the default is to use
+.Sq graphite .
+This option is ignored when used with a
+.Ic fanout
+exchange.
+.Pp
+.It Xo
+.Ic metric-location
+.Pq Ic message Ns | Ns Ic key
+.Xc
+Specify the location of the Graphite metric key in the AMQP message.
+Use
+.Ic key Pq the default
+to take the metric key from the
+.Ar routing-key
+of the message which is possible when using
+.Ic topic
+exchanges.
+Use
+.Ic message
+to take the metric key from the body of the message.
+.Pp
+.El
+.Sh FILES
+.Bl -tag -width "/etc/graphite-dequeue.conf" -compact
+.It Pa /etc/graphite-dequeue.conf
+Default location of the configuration file.
+.El
+.Sh EXAMPLES
+The following example is the default options
+.Xr graphite-dequeue 8
+uses:
+.Bd -literal -offset indent
+graphite localhost port 2003
+amqp localhost port 5672 vhost "/" user "guest" password "guest"
+exchange "graphite" type topic
+queue "graphite"
+binding "#"
+metric-location key
+.Ed
+.Sh NOTES
+The advanced exchange and queue options are only currently supported by
+RabbitMQ brokers.
+.Sh SEE ALSO
+.Xr graphite-dequeue 8 ,
+.Xr graphite-enqueue 8 ,
+.Xr graphite-enqueue.conf 5
+.Sh AUTHORS
+The
+.Xr graphite-dequeue 8
+program was written by
+.An Matt Dainty Aq matt@bodgit-n-scarper.com .
