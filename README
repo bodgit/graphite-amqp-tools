@@ -1,0 +1,15 @@
+Basically gluing libevent2 and librabbitmq together to make the following pair
+of daemons that should be efficient, have low memory usage, and not fall over
+at the faintest whiff of some new AMQP feature:
+
+graphite-enqueue - provides the graphite TCP line receiver protocol and
+                   forwards all received messages on to a given AMQP exchange.
+                   Supports using the metric name as the routing key or using
+                   an arbitrary routing key and keeping the metric name in the
+                   message payload.
+
+graphite-dequeue - does the opposite, receives messages from a given AMQP
+                   queue bound to an exchange (creating both if necessary)
+                   with arbitrary bindings and posts them on to a given
+                   graphite TCP line receiver. Supports setting various
+                   extended queue attributes such as mirroring and message TTL.
