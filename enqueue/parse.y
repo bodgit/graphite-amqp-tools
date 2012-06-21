@@ -710,7 +710,9 @@ host_v4(const char *s)
 	if ((h = calloc(1, sizeof(struct enqueue_addr))) == NULL)
 		fatal(NULL);
 	sa_in = (struct sockaddr_in *)&h->ss;
+#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
 	sa_in->sin_len = sizeof(struct sockaddr_in);
+#endif
 	sa_in->sin_family = AF_INET;
 	sa_in->sin_addr.s_addr = ina.s_addr;
 
@@ -732,7 +734,9 @@ host_v6(const char *s)
 		if ((h = calloc(1, sizeof(struct enqueue_addr))) == NULL)
 			fatal(NULL);
 		sa_in6 = (struct sockaddr_in6 *)&h->ss;
+#ifdef HAVE_STRUCT_SOCKADDR_IN6_SIN6_LEN
 		sa_in6->sin6_len = sizeof(struct sockaddr_in6);
+#endif
 		sa_in6->sin6_family = AF_INET6;
 		memcpy(&sa_in6->sin6_addr,
 		    &((struct sockaddr_in6 *)res->ai_addr)->sin6_addr,
@@ -778,12 +782,16 @@ host_dns(const char *s, struct enqueue_addr **hn)
 		h->ss.ss_family = res->ai_family;
 		if (res->ai_family == AF_INET) {
 			sa_in = (struct sockaddr_in *)&h->ss;
+#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
 			sa_in->sin_len = sizeof(struct sockaddr_in);
+#endif
 			sa_in->sin_addr.s_addr = ((struct sockaddr_in *)
 			    res->ai_addr)->sin_addr.s_addr;
 		} else {
 			sa_in6 = (struct sockaddr_in6 *)&h->ss;
+#ifdef HAVE_STRUCT_SOCKADDR_IN6_SIN6_LEN
 			sa_in6->sin6_len = sizeof(struct sockaddr_in6);
+#endif
 			memcpy(&sa_in6->sin6_addr, &((struct sockaddr_in6 *)
 			    res->ai_addr)->sin6_addr, sizeof(struct in6_addr));
 		}

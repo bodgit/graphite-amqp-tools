@@ -26,6 +26,8 @@
 
 #include <amqp.h>
 
+#include "config.h"
+
 #define	GRAPHITE_DEFAULT_HOST		"localhost"
 #define	GRAPHITE_DEFAULT_PORT		2003
 
@@ -48,6 +50,15 @@
 #define	AMQP_EXCHANGE_TYPE_TOPIC	"topic"
 #define	AMQP_EXCHANGE_TYPE_FANOUT	"fanout"
 #define	AMQP_EXCHANGE_TYPE_HEADERS	"headers"
+
+#ifndef SA_LEN
+#ifdef HAVE_STRUCT_SOCKADDR_SA_LEN
+#define	SA_LEN(x)	((x)->sa_len)
+#else
+#define	SA_LEN(x)	((x)->sa_family == AF_INET  ? sizeof(struct sockaddr_in) : \
+			 (x)->sa_family == AF_INET6 ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr))
+#endif
+#endif
 
 struct binding {
 	char			*key;
