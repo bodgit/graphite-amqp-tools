@@ -126,7 +126,7 @@ main(int argc, char *argv[])
 			fatal("socket");
 
 		if (connect(fd, (struct sockaddr *)&ga->sa,
-		    ((struct sockaddr *)&ga->sa)->sa_len) == -1) {
+		    SA_LEN((struct sockaddr *)&ga->sa)) == -1) {
 			log_warn("connect to %s failed, skipping",
 			    log_sockaddr((struct sockaddr *)&ga->sa));
 			close(fd);

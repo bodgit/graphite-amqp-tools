@@ -60,6 +60,10 @@
 #endif
 #endif
 
+#ifndef __dead
+#define	__dead
+#endif
+
 struct binding {
 	char			*key;
 	LIST_ENTRY(binding)	 entry;

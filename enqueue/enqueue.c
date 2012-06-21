@@ -229,7 +229,7 @@ main(int argc, char *argv[])
 		}
 
 		if (bind(fd, (struct sockaddr *)&la->sa,
-		    ((struct sockaddr *)&la->sa)->sa_len) == -1) {
+		    SA_LEN((struct sockaddr *)&la->sa)) == -1) {
 			log_warn("bind on %s failed, skipping",
 			    log_sockaddr((struct sockaddr *)&la->sa));
 			close(la->fd);
