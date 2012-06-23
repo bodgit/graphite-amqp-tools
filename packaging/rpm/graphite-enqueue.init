@@ -8,7 +8,7 @@
 # Source function library.
 . /etc/rc.d/init.d/functions
 
-exec="/usr/bin/graphite-enqueue"
+exec="/usr/sbin/graphite-enqueue"
 
 CONFIG="/etc/graphite-enqueue.conf"
 
