@@ -213,8 +213,8 @@ main(int argc, char *argv[])
 		}
 
 		/* Allocate array of iovec structures */
-		if ((data = calloc(lines *
-		    (env->amqp->flags & AMQP_FLAG_METRIC_IN_MESSAGE) ? 2 : 4,
+		if ((data = calloc(
+		    (env->amqp->flags & AMQP_FLAG_METRIC_IN_MESSAGE) ? lines * 2 : lines * 4,
 		    sizeof(struct iovec))) == NULL)
 			fatal("calloc");
 
