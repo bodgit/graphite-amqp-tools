@@ -1,6 +1,14 @@
-bison_target(PARSER parse.y ${CMAKE_CURRENT_BINARY_DIR}/parse.c)
+set(DEQUEUE_MANS graphite-dequeue.8 graphite-dequeue.conf.5)
+set(DEQUEUE_MANS_COMPRESSED graphite-dequeue.8.gz graphite-dequeue.conf.5.gz)
 
-set(DEQUEUE_MANS_COMPRESSED graphite-dequeue.8.gz graphite-deeueue.conf.5.gz)
+foreach(man ${DEQUEUE_MANS})
+	add_custom_command(OUTPUT ${man}.gz
+		COMMAND ${GZIP_TOOL} -c ${man} >${man}.gz
+		DEPENDS ${man}
+		COMMENT "Building ${man}.gz")
+endforeach()
+
+bison_target(PARSER parse.y ${CMAKE_CURRENT_BINARY_DIR}/parse.c)
 
 add_executable(graphite-dequeue
 	dequeue.c
@@ -12,15 +20,6 @@ add_executable(graphite-dequeue
 target_link_libraries(graphite-dequeue
 	${RABBITMQ_LIBRARIES}
 )
-
-set(DEQUEUE_MANS graphite-dequeue.8 graphite-deeueue.conf.5)
-
-foreach(man ${DEQUEUE_MANS})
-	add_custom_command(OUTPUT ${man}.gz
-		COMMAND ${GZIP_TOOL} -c ${man} >${man}.gz
-		DEPENDS ${man}
-		COMMENT "Building ${man}.gz")
-endforeach()
 
 install(TARGETS graphite-dequeue
 	DESTINATION "sbin"

@@ -1,6 +1,14 @@
-bison_target(PARSER parse.y ${CMAKE_CURRENT_BINARY_DIR}/parse.c)
-
+set(ENQUEUE_MANS graphite-enqueue.8 graphite-enqueue.conf.5)
 set(ENQUEUE_MANS_COMPRESSED graphite-enqueue.8.gz graphite-enqueue.conf.5.gz)
+
+foreach(man ${ENQUEUE_MANS})
+	add_custom_command(OUTPUT ${man}.gz
+		COMMAND ${GZIP_TOOL} -c ${man} >${man}.gz
+		DEPENDS ${man}
+		COMMENT "Building ${man}.gz")
+endforeach()
+
+bison_target(PARSER parse.y ${CMAKE_CURRENT_BINARY_DIR}/parse.c)
 
 add_executable(graphite-enqueue
 	enqueue.c
@@ -13,15 +21,6 @@ target_link_libraries(graphite-enqueue
 	${RABBITMQ_LIBRARIES}
 	${EVENT_LIBRARIES}
 )
-
-set(ENQUEUE_MANS graphite-enqueue.8 graphite-eneueue.conf.5)
-
-foreach(man ${ENQUEUE_MANS})
-	add_custom_command(OUTPUT ${man}.gz
-		COMMAND ${GZIP_TOOL} -c ${man} >${man}.gz
-		DEPENDS ${man}
-		COMMENT "Building ${man}.gz")
-endforeach()
 
 install(TARGETS graphite-enqueue
 	DESTINATION "sbin"
