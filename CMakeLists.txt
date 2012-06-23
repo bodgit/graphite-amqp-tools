@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.8.8)
 
 project(graphite-amqp-tools C)
 
-set(CMAKE_C_FLAGS "${CMAKE_CFLAGS} -Wall -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations -Wshadow -Wpointer-arith -Wcast-qual -Wsign-compare")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations -Wshadow -Wpointer-arith -Wcast-qual -Wsign-compare")
 
 include(FindBISON)
 include(FindPkgConfig)
