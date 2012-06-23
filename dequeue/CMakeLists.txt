@@ -1,9 +1,12 @@
 bison_target(PARSER parse.y ${CMAKE_CURRENT_BINARY_DIR}/parse.c)
 
+set(DEQUEUE_MANS_COMPRESSED graphite-dequeue.8.gz graphite-deeueue.conf.5.gz)
+
 add_executable(graphite-dequeue
 	dequeue.c
 	${BISON_PARSER_OUTPUTS}
 	$<TARGET_OBJECTS:common>
+	${DEQUEUE_MANS_COMPRESSED}
 )
 
 target_link_libraries(graphite-dequeue
