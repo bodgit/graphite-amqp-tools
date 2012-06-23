@@ -6,7 +6,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wstrict-prototypes -Wmissing-prototyp
 
 include(FindBISON)
 include(FindPkgConfig)
-#pkg_check_modules(RABBITMQ REQUIRED librabbitmq>=0.2.0)
+pkg_check_modules(RABBITMQ REQUIRED librabbitmq>=0.2.0)
 pkg_check_modules(EVENT REQUIRED libevent>=2)
 
 find_program(GZIP_TOOL
