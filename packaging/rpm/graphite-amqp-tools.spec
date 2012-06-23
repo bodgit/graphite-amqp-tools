@@ -19,6 +19,7 @@ BuildRequires	: cmake >= 2.8.8
 %endif
 BuildRequires	: librabbitmq-devel >= 0.2.0
 BuildRequires	: libevent-devel >= 2
+BuildRequires	: bison
 
 %description
 Graphite AMQP Tools
