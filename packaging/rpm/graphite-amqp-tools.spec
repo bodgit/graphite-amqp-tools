@@ -2,7 +2,7 @@ Name		: graphite-amqp-tools
 Version		: 0.1
 Release		: 1.20120623gitXXXXXXXX
 Summary		: Graphite AMQP Tools
-Group		: FIXME
+Group		: Applications/Internet
 
 Source0		: %{name}-%{version}.tar.gz
 URL		: https://github.com/bodgit/graphite-amqp-tools
@@ -22,7 +22,8 @@ BuildRequires	: libevent-devel >= 2
 BuildRequires	: bison
 
 %description
-Graphite AMQP Tools
+Graphite AMQP Tools is a set of tools for getting Graphite data in and
+out of AMQP message brokers.
 
 %prep
 %setup -q
@@ -48,6 +49,10 @@ for i in graphite-{dequeue,enqueue} ; do
 	%{__install} -m 0755 packaging/rpm/${i}.init \
 		%{buildroot}%{_sysconfdir}/rc.d/init.d/${i}
 done
+
+%posttrans
+/sbin/service graphite-dequeue condrestart >/dev/null 2>&1 || :
+/sbin/service graphite-enqueue condrestart >/dev/null 2>&1 || :
 
 %clean
 %{__rm} -rf %{buildroot}
