@@ -291,6 +291,7 @@ amqp_acknowledge(struct amqp *env, int tag)
 void
 amqp_reject(struct amqp *env, int tag, int requeue)
 {
+	amqp_basic_reject(env->c, AMQP_DEFAULT_CHANNEL, tag, requeue);
 }
 
 void

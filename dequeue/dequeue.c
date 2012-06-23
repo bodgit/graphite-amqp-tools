@@ -14,6 +14,8 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <sys/uio.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -21,6 +23,9 @@
 #include <pwd.h>
 
 #include "dequeue.h"
+
+#define	SPACE	" "
+#define	NEWLINE	"\n"
 
 __dead void	 usage(void);
 
@@ -36,21 +41,23 @@ usage(void)
 int
 main(int argc, char *argv[])
 {
-	int		 c;
-	int		 debug = 0;
-	int		 noaction = 0;
-	const char	*conffile = DEQUEUE_CONF_FILE;
-	//u_int		 flags = 0;
-	struct passwd	*pw;
+	int		  c;
+	int		  debug = 0;
+	int		  noaction = 0;
+	const char	 *conffile = DEQUEUE_CONF_FILE;
+	//u_int		  flags = 0;
+	struct passwd	 *pw;
 
-	size_t		 len;
-	struct dequeue	*env;
-	int		 tag;
-	char		*buf = NULL;
-	char		*key = NULL;
-	char		*ptr;
-	int		 i, lines;
+	size_t		  len;
+	struct dequeue	 *env;
+	int		  tag;
+	char		 *buf = NULL;
+	char		 *key = NULL;
+	char		 *ptr;
+	int		  i, j, lines;
 	char		**line;
+	struct iovec	 *data;
+	ssize_t		  bytes;
 
 	struct graphite_addr	*ga;
 	int			 fd;
@@ -136,6 +143,8 @@ main(int argc, char *argv[])
 
 		break;
 	}
+	if (ga == NULL)
+		fatalx("could not connect to graphite host");
 
 	log_info("startup");
 
@@ -181,7 +190,8 @@ main(int argc, char *argv[])
 				while (*ptr == '\n') ptr++;
 			}
 		}
-		//log_info("%d lines", lines);
+		log_debug("%d line%s in message", lines,
+		    (lines == 1) ? "" : "s");
 
 		/* Allocate array of pointers to reference each line */
 		if ((line = calloc(lines, sizeof(char *))) == NULL)
@@ -202,8 +212,16 @@ main(int argc, char *argv[])
 			}
 		}
 
-		/* Parse each line, one failure rejects the message */
-		for (i = 0; i < lines; i++) {
+		/* Allocate array of iovec structures */
+		if ((data = calloc(lines *
+		    (env->amqp->flags & AMQP_FLAG_METRIC_IN_MESSAGE) ? 2 : 4,
+		    sizeof(struct iovec))) == NULL)
+			fatal("calloc");
+
+		/* Parse each line, one failure rejects the message. Build up
+		 * list of iovec structures as we go
+		 */
+		for (i = 0, j = 0; i < lines; i++) {
 
 			/* Ignore completely empty lines */
 			if (strlen(line[i]) == 0)
@@ -215,32 +233,43 @@ main(int argc, char *argv[])
 			} else {
 				if (graphite_parse(key, line[i]) < 0)
 					break;
+
+				data[j].iov_base = key;
+				data[j].iov_len = strlen(key);
+				j++;
+
+				data[j].iov_base = SPACE;
+				data[j].iov_len = strlen(SPACE);
+				j++;
 			}
+
+			data[j].iov_base = line[i];
+			data[j].iov_len = strlen(line[i]);
+			j++;
+
+			data[j].iov_base = NEWLINE;
+			data[j].iov_len = strlen(NEWLINE);
+			j++;
 		}
 		if (i < lines) {
-			//log_info("rejected");
-			amqp_basic_reject(env->amqp->c, AMQP_DEFAULT_CHANNEL,
-			    tag, 0); /* <-- Flip this to 1 to re-queue */
+			amqp_reject(env->amqp, tag, 0);
+			log_debug("message rejected");
 		} else {
-			//log_info("accepted");
-			for (i = 0; i < lines; i++) {
-				if (strlen(line[i]) == 0)
-					continue;
-				if (env->amqp->flags & AMQP_FLAG_METRIC_IN_MESSAGE) {
-					send(fd, line[i], strlen(line[i]), 0);
-				} else {
-					send(fd, key, strlen(key), 0);
-					send(fd, " ", 1, 0);
-					send(fd, line[i], strlen(line[i]), 0);
-				}
-				send(fd, "\n", 1, 0);
+			/* Go go gadget writev */
+			if ((bytes = writev(fd, data, j)) == -1) {
+				log_warn("writev");
+				amqp_reject(env->amqp, tag, 1);
+				/* FIXME retry/reconnect logic here */
+			} else {
+				amqp_acknowledge(env->amqp, tag);
+				log_debug("message accepted, %d bytes written to graphite",
+				    bytes);
 			}
-			amqp_basic_ack(env->amqp->c, AMQP_DEFAULT_CHANNEL,
-			    tag, 0);
 		}
 
+		/* Free all of the things */
+		free(data);
 		free(line);
-
 		free(key);
 		free(buf);
 	}
