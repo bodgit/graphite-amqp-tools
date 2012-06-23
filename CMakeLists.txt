@@ -29,6 +29,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL Linux)
 	add_definitions(-D_GNU_SOURCE)
 endif()
 
+set(PROJECT_VERSION "0.1")
+set(ARCHIVE_NAME ${CMAKE_PROJECT_NAME}-${PROJECT_VERSION})
+add_custom_target(dist
+	COMMAND git archive --prefix=${ARCHIVE_NAME}/ HEAD
+		| bzip2 > ${CMAKE_BINARY_DIR}/${ARCHIVE_NAME}.tar.bz2
+	WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 include_directories(
 	${CMAKE_CURRENT_BINARY_DIR}
 	common
