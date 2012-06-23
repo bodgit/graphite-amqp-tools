@@ -1,0 +1,3 @@
+# Configuration file for graphite-dequeue
+
+# CONFIG=/etc/graphite-dequeue.conf
