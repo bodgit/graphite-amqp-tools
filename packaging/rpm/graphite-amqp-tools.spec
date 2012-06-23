@@ -43,9 +43,9 @@ make install DESTDIR=%{buildroot}
 %{__mkdir_p} %{buildroot}%{_sysconfdir}/sysconfig
 %{__mkdir_p} %{buildroot}%{_sysconfdir}/rc.d/init.d
 for i in graphite-{dequeue,enqueue} ; do
-	%{__install} packaging/rpm/${i}.sysconfig \
+	%{__install} -m 0644 packaging/rpm/${i}.sysconfig \
 		%{buildroot}%{_sysconfdir}/sysconfig/${i}
-	%{__install} packaging/rpm/${i}.init \
+	%{__install} -m 0755 packaging/rpm/${i}.init \
 		%{buildroot}%{_sysconfdir}/rc.d/init.d/${i}
 done
 
@@ -54,7 +54,7 @@ done
 
 %files
 %defattr(-,root,root)
-%config %attr(0640) %{_sysconfdir}/graphite-*.conf
+%config %attr(0640,-,-) %{_sysconfdir}/graphite-*.conf
 %config %{_sysconfdir}/sysconfig/graphite-*
 %{_sysconfdir}/rc.d/init.d/graphite-*
 %{_sbindir}/graphite-*
