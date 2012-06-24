@@ -216,6 +216,14 @@ amqp_queue(struct amqp *env)
 				goto bad;
 		}
 
+	/* Prefetch QoS */
+	if (env->prefetch > 0) {
+		amqp_basic_qos(env->c, AMQP_DEFAULT_CHANNEL, 0,
+		    env->prefetch, 0);
+		if (amqp_log_amqp_error(amqp_get_rpc_reply(env->c)) != 0)
+			goto bad;
+	}
+
 	amqp_basic_consume(env->c, AMQP_DEFAULT_CHANNEL,
 	    amqp_cstring_bytes(env->queue), amqp_empty_bytes, 0, 0, 0,
 	    amqp_empty_table);

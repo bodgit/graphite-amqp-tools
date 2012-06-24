@@ -64,6 +64,7 @@ struct opts {
 	char		*type;
 	char		*upstreams;
 	long long	 ttl;
+	int		 prefetch;
 	int		 flags;
 } opts;
 void		 opts_default(void);
@@ -88,7 +89,7 @@ typedef struct {
 %token	GRAPHITE
 %token	AMQP VHOST USER PASSWORD
 %token	EXCHANGE TYPE FEDERATED
-%token	QUEUE MIRRORED TTL
+%token	QUEUE MIRRORED TTL PREFETCH
 %token	BINDING
 %token	METRICLOCATION
 %token	PORT
@@ -108,6 +109,7 @@ typedef struct {
 %type	<v.opts>		federated
 %type	<v.opts>		mirrored
 %type	<v.opts>		ttl
+%type	<v.opts>		prefetch
 %%
 
 grammar		: /* empty */
@@ -181,6 +183,7 @@ main		: GRAPHITE address graphite_opts	{
 			conf->amqp->flags &= ~AMQP_FLAG_MIRRORED_QUEUE;
 			conf->amqp->flags |= opts.flags;
 			conf->amqp->ttl = opts.ttl;
+			conf->amqp->prefetch = opts.prefetch;
 		}
 		| BINDING STRING			{
 			if ((b = init_binding()) == NULL)
@@ -265,6 +268,7 @@ queue_opts_l	: queue_opts_l queue_opt
 		| queue_opt
 		;
 queue_opt	: mirrored
+		| prefetch
 		| ttl
 		;
 
@@ -311,6 +315,15 @@ federated	: FEDERATED STRING {
 
 mirrored	: MIRRORED {
 			opts.flags |= AMQP_FLAG_MIRRORED_QUEUE;
+		}
+		;
+
+prefetch	: PREFETCH NUMBER {
+			if ($2 < 0 || $2 > UINT_MAX) {
+				yyerror("invalid prefetch");
+				YYERROR;
+			}
+			opts.prefetch = $2;
 		}
 		;
 
@@ -381,6 +394,7 @@ lookup(char *s)
 		{ "mirrored",		MIRRORED},
 		{ "password",		PASSWORD},
 		{ "port",		PORT},
+		{ "prefetch",		PREFETCH},
 		{ "queue",		QUEUE},
 		{ "ttl",		TTL},
 		{ "type",		TYPE},

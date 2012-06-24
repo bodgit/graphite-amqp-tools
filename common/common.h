@@ -84,6 +84,7 @@ struct amqp {
 	long long			 ttl;
 	unsigned long long		 bytes;
 	long long			 timeout;
+	int				 prefetch;
 
 	int				 flags;
 

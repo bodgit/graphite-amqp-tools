@@ -94,6 +94,7 @@ exchange type respectively.
 .Ic queue Ar string
 .Op Ic mirrored
 .Op Ic ttl Ar milliseconds
+.Op Ic prefetch Ar count
 .Xc
 Specify the
 .Ar queue
@@ -109,6 +110,10 @@ option will pass the
 .Sq Ar x-message-ttl
 argument which expires any unread messages in the queue after
 .Ar milliseconds .
+Use the
+.Ic prefetch
+option to set the QoS prefetch
+.Ar count .
 .Pp
 .It Xo
 .Ic binding Ar routing-key
