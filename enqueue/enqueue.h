@@ -54,6 +54,10 @@ struct enqueue {
 	TAILQ_HEAD(listen_addrs, listen_addr)	 listen_addrs;
 
 	struct amqp				*amqp;
+
+	char					*buffer;
+	struct event				*ev;
+	struct timeval				 t;
 };
 
 /* prototypes */

@@ -26,6 +26,7 @@
 #define	MAX_LINE	4096
 
 __dead void	 usage(void);
+void		 amqp_flush(int, short, void *);
 void		 graphite_read(struct bufferevent *, void *);
 void		 graphite_error(struct bufferevent *, short, void *);
 void		 graphite_accept(int, short, void *);
@@ -40,57 +41,93 @@ usage(void)
 }
 
 void
+amqp_flush(int fd, short event, void *arg)
+{
+	struct enqueue	*env = (struct enqueue *)arg;
+
+	log_debug("timeout fired");
+
+	/* Send what's in the buffer and zero it */
+	if (strlen(env->buffer) > 0)
+		amqp_publish(env->amqp, env->amqp->key, env->buffer);
+	*env->buffer = '\0';
+}
+
+void
 graphite_read(struct bufferevent *bev, void *arg)
 {
 	struct enqueue		*env = (struct enqueue *)arg;
 	struct evbuffer		*input;
 	struct evbuffer		*output;
-	char			*line, *data, *key;
+	char			*line, *data;
 	size_t			 n;
 	int			 len;
-
-	amqp_bytes_t		 msg;
-	amqp_basic_properties_t	 p;
 
 	input = bufferevent_get_input(bev);
 	output = bufferevent_get_output(bev);
 
 	while ((line = evbuffer_readln(input, &n, EVBUFFER_EOL_CRLF))) {
 		//log_debug("Got line: \"%s\"", line);
-		if ((len = graphite_parse(NULL, line)) < 0) {
-			free(line);
-			continue;
-		}
+		if ((len = graphite_parse(NULL, line)) < 0)
+			goto loop;
 
-		if (env->amqp->flags & AMQP_FLAG_METRIC_IN_MESSAGE) {
-			data = line;
-			key = env->amqp->key;
-		} else {
-			/* The metric is used as the routing key so using the
-			 * length of the key, overwrite the first space with a
-			 * null and set the pointer to point to the value and
-			 * timestamp following it
-			 */
+		/* The metric is used as the routing key so using the length
+		 * of the key, overwrite the first space with a null and set
+		 * the pointer to point to the value and timestamp following
+		 * it
+		 */
+		if (!(env->amqp->flags & AMQP_FLAG_METRIC_IN_MESSAGE)) {
 			data = line + len;
 			*data = '\0';
 			data++;
-			key = line;
+
+			/* Send immediately, we can't batch these */
+			amqp_publish(env->amqp, line, data);
+			goto loop;
 		}
 
-		//log_info("key = \"%s\", payload = \"%s\"", key, data);
+		/* The metric is is in the message, no batching */
+		if (env->amqp->bytes == 0) {
+			amqp_publish(env->amqp, env->amqp->key, line);
+			goto loop;
+		}
 
-		/* Persistent */
-		p._flags = AMQP_BASIC_DELIVERY_MODE_FLAG;
-		p.delivery_mode = 2;
+		/* Deactivate the timeout */
+		if (evtimer_pending(env->ev, NULL))
+			evtimer_del(env->ev);
 
-		msg.len = strlen(data);
-		msg.bytes = data;
+		/* Existing data in the buffer? */
+		if (strlen(env->buffer) > 0) {
+			if ((strlen(env->buffer) + 1 + strlen(line)) > env->amqp->bytes) {
+				/* Send what we have */
+				amqp_publish(env->amqp, env->amqp->key,
+				    env->buffer);
+				*env->buffer = '\0';
+			} else {
+				/* Append a newline and the latest metric */
+				strcat(env->buffer, "\n");
+				strcat(env->buffer, line);
 
-		/* XXX Maybe support mandatory? */
-		amqp_basic_publish(env->amqp->c, AMQP_DEFAULT_CHANNEL,
-		    amqp_cstring_bytes(env->amqp->exchange),
-		    amqp_cstring_bytes(key), 0, 0, &p, msg);
+				/* Set the timeout timer */
+				evtimer_add(env->ev, &env->t);
 
+				goto loop;
+			}
+		}
+
+		if (strlen(line) > env->amqp->bytes) {
+			/* Numpty has set the batch size too low */
+			log_warnx("batch size is set too low");
+			amqp_publish(env->amqp, env->amqp->key, line);
+		} else {
+			/* Set the buffer to this new metric */
+			strcpy(env->buffer, line);
+
+			/* Set the timeout timer */
+			evtimer_add(env->ev, &env->t);
+		}
+
+loop:
 		free(line);
 	}
 
@@ -244,10 +281,22 @@ main(int argc, char *argv[])
 			fatal("listen");
 
 		la->ev = event_new(env->base, fd, EV_READ|EV_PERSIST,
-			graphite_accept, (void *)env);
+		    graphite_accept, (void *)env);
 		event_add(la->ev, NULL);
 
 		la = TAILQ_NEXT(la, entry);
+	}
+
+	if ((env->amqp->flags & AMQP_FLAG_METRIC_IN_MESSAGE) &&
+	    (env->amqp->bytes > 0)) {
+		/* Allocate buffer to batch up metrics */
+		if ((env->buffer = calloc(1, env->amqp->bytes + 1)) == NULL)
+			fatal("calloc");
+
+		/* Create timer event for flushing */
+		env->ev = evtimer_new(env->base, amqp_flush, (void *)env);
+		env->t.tv_sec = env->amqp->timeout / 1000;
+		env->t.tv_usec = (env->amqp->timeout % 1000) * 1000;
 	}
 
 	log_info("startup");

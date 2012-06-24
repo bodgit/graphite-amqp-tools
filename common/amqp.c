@@ -283,6 +283,26 @@ amqp_consume(struct amqp *env, char **key, char **buf, size_t *len)
 }
 
 void
+amqp_publish(struct amqp *env, char *key, char *data)
+{
+	amqp_bytes_t		 msg;
+	amqp_basic_properties_t	 p;
+
+	/* Persistent messages */
+	p._flags = AMQP_BASIC_DELIVERY_MODE_FLAG;
+	p.delivery_mode = 2;
+
+	msg.len = strlen(data);
+	msg.bytes = data;
+
+	log_debug("publishing %d bytes", strlen(data));
+
+	amqp_basic_publish(env->c, AMQP_DEFAULT_CHANNEL,
+	    amqp_cstring_bytes(env->exchange), amqp_cstring_bytes(key), 0, 0,
+	    &p, msg);
+}
+
+void
 amqp_acknowledge(struct amqp *env, int tag)
 {
 	amqp_basic_ack(env->c, AMQP_DEFAULT_CHANNEL, tag, 0);

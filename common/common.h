@@ -82,7 +82,7 @@ struct amqp {
 	char				*upstreams;
 	char				*queue;
 	long long			 ttl;
-	long long			 bytes;
+	unsigned long long		 bytes;
 	long long			 timeout;
 
 	int				 flags;
@@ -99,6 +99,7 @@ int		 amqp_open(struct amqp *);
 int		 amqp_exchange(struct amqp *);
 int		 amqp_queue(struct amqp *);
 int		 amqp_consume(struct amqp *, char **, char **, size_t *);
+void		 amqp_publish(struct amqp *, char *, char *);
 void		 amqp_acknowledge(struct amqp *, int);
 void		 amqp_reject(struct amqp *, int, int);
 void		 amqp_close(struct amqp *);
