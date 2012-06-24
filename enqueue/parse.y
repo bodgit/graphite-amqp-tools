@@ -64,6 +64,7 @@ struct opts {
 	char		*type;
 	char		*upstreams;
 	int		 flags;
+	long long	 timeout;
 } opts;
 void		 opts_default(void);
 
@@ -85,8 +86,10 @@ typedef struct {
 %token	AMQP VHOST USER PASSWORD
 %token	EXCHANGE TYPE FEDERATED
 %token	METRICLOCATION
+%token	MESSAGESIZE
 %token	ROUTINGKEY
 %token	PORT
+%token	TIMEOUT
 %token	ERROR
 %token	<v.string>		STRING
 %token	<v.number>		NUMBER
@@ -94,12 +97,14 @@ typedef struct {
 %type	<v.opts>		amqp_opts amqp_opts_l amqp_opt
 %type	<v.opts>		exchange_opts exchange_opts_l exchange_opt
 %type	<v.opts>		listen_opts listen_opts_l listen_opt
+%type	<v.opts>		message_opts message_opts_l message_opt
 %type	<v.opts>		port
 %type	<v.opts>		vhost
 %type	<v.opts>		user
 %type	<v.opts>		password
 %type	<v.opts>		type
 %type	<v.opts>		federated
+%type	<v.opts>		timeout
 %%
 
 grammar		: /* empty */
@@ -165,6 +170,11 @@ main		: LISTEN ON address listen_opts	{
 			if (conf->amqp->upstreams)
 				free(conf->amqp->upstreams);
 			conf->amqp->upstreams = (opts.upstreams) ? opts.upstreams : NULL;
+		}
+		| MESSAGESIZE NUMBER message_opts	{
+			conf->amqp->bytes = $2;
+
+			conf->amqp->timeout = (opts.timeout) ? opts.timeout : AMQP_DEFAULT_TIMEOUT;
 		}
 		| METRICLOCATION STRING		{
 			if (!strcmp($2, "message"))
@@ -239,6 +249,17 @@ listen_opts_l	: listen_opts_l listen_opt
 listen_opt	: port
 		;
 
+message_opts	:	{ opts_default(); }
+		  message_opts_l
+			{ $$ = opts; }
+		|	{ opts_default(); $$ = opts; }
+		;
+message_opts_l	: message_opts_l message_opt
+		| message_opt
+		;
+message_opt	: timeout
+		;
+
 port		: PORT NUMBER {
 			if ($2 < 0 || $2 > USHRT_MAX) {
 				yyerror("invalid port number");
@@ -277,6 +298,15 @@ type		: TYPE STRING {
 
 federated	: FEDERATED STRING {
 			opts.upstreams = $2;
+		}
+		;
+
+timeout		: TIMEOUT NUMBER {
+			if ($2 < 1 || $2 > LLONG_MAX) {
+				yyerror("invalid timeout");
+				YYERROR;
+			}
+			opts.timeout = $2;
 		}
 		;
 
@@ -324,11 +354,13 @@ lookup(char *s)
 		{ "exchange",		EXCHANGE},
 		{ "federated",		FEDERATED},
 		{ "listen",		LISTEN},
+		{ "message-size",	MESSAGESIZE},
 		{ "metric-location",	METRICLOCATION},
 		{ "on",			ON},
 		{ "password",		PASSWORD},
 		{ "port",		PORT},
 		{ "routing-key",	ROUTINGKEY},
+		{ "timeout",		TIMEOUT},
 		{ "type",		TYPE},
 		{ "user",		USER},
 		{ "vhost",		VHOST}
@@ -656,6 +688,10 @@ parse_config(const char *filename, int flags)
 	if (conf->amqp->type == NULL)
 		if ((conf->amqp->type = strdup(AMQP_DEFAULT_EXCHANGE_TYPE)) == NULL)
 			fatal("strdup");
+
+	/* AMQP message sending timeout */
+	if (conf->amqp->timeout == 0)
+		conf->amqp->timeout = AMQP_DEFAULT_TIMEOUT;
 
 	/* Only topic exchanges can handle the metric key as the routing key */
 	if (strcmp(conf->amqp->type, AMQP_EXCHANGE_TYPE_TOPIC) &&

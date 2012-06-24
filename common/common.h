@@ -42,6 +42,7 @@
 #define	AMQP_DEFAULT_QUEUE		"graphite"
 #define	AMQP_DEFAULT_BINDING_TOPIC	"#"
 #define	AMQP_DEFAULT_BINDING_DIRECT	"graphite"
+#define	AMQP_DEFAULT_TIMEOUT		500
 
 #define	AMQP_FLAG_METRIC_IN_MESSAGE	(1 << 0)
 #define	AMQP_FLAG_MIRRORED_QUEUE	(1 << 1)
@@ -81,6 +82,8 @@ struct amqp {
 	char				*upstreams;
 	char				*queue;
 	long long			 ttl;
+	long long			 bytes;
+	long long			 timeout;
 
 	int				 flags;
 

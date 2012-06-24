@@ -117,6 +117,27 @@ is set to
 It defaults to
 .Sq graphite .
 .Pp
+.It Xo
+.Ic message-size Ar bytes
+.Op Ic timeout Ar milliseconds
+.Xc
+Specify the upper limit of the message payload in terms of
+.Ar bytes .
+Multiple metrics will be batched into a single message until this limit is
+reached.
+By default each metric is sent in its own message.
+Use the
+.Ic timeout
+option to override the default timeout of 500 milliseconds for sending
+.Sq incomplete
+messages with less than
+.Ar bytes
+of payload.
+This option is ignored entirely if
+.Ar metric-location
+is set to
+.Ar key .
+.Pp
 .El
 .Sh FILES
 .Bl -tag -width "/etc/graphite-enqueue.conf" -compact
