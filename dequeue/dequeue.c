@@ -21,6 +21,7 @@
 #include <unistd.h>
 #include <err.h>
 #include <pwd.h>
+#include <signal.h>
 
 #include "dequeue.h"
 
@@ -171,6 +172,8 @@ main(int argc, char *argv[])
 		fatalx("amqp_exchange");
 	if (amqp_queue(env->amqp) != 0)
 		fatalx("amqp_queue");
+
+	signal(SIGPIPE, SIG_IGN);
 
 	/* At this point, we are ready to consume messages in some sort of loop
 	 */

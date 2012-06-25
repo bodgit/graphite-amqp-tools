@@ -20,6 +20,7 @@
 #include <unistd.h>
 #include <err.h>
 #include <pwd.h>
+#include <signal.h>
 
 #include "enqueue.h"
 
@@ -324,6 +325,8 @@ main(int argc, char *argv[])
 		fatalx("amqp_open");
 	if (amqp_exchange(env->amqp) != 0)
 		fatalx("amqp_exchange");
+
+	signal(SIGPIPE, SIG_IGN);
 
 	event_base_dispatch(env->base);
 
