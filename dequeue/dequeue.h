@@ -36,10 +36,9 @@ struct dequeue_addr_wrap {
 };
 
 struct graphite {
-	char			*host;
-	int			 port;
-	int			 fd;
-	struct sockaddr_storage	 ss;
+	char	*host;
+	int	 port;
+	int	 fd;
 };
 
 struct dequeue {
