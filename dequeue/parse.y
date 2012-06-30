@@ -649,8 +649,6 @@ parse_config(const char *filename, int flags)
 		return (NULL);
 	}
 
-	//TAILQ_INIT(&conf->graphite_addrs);
-
 	if ((file = pushfile(filename)) == NULL) {
 		free(conf);
 		return (NULL);
