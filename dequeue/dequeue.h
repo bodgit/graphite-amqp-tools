@@ -25,13 +25,6 @@
 #define	DEQUEUE_CONF_FILE	"/etc/graphite-dequeue.conf"
 #define	DEQUEUE_USER		"_dequeue"
 
-struct graphite_addr {
-	TAILQ_ENTRY(graphite_addr)	 entry;
-	struct sockaddr_storage		 sa;
-	int				 fd;
-	int				 port;
-};
-
 struct dequeue_addr {
 	struct dequeue_addr	*next;
 	struct sockaddr_storage	 ss;
@@ -42,9 +35,16 @@ struct dequeue_addr_wrap {
 	struct dequeue_addr	*a;
 };
 
+struct graphite {
+	char			*host;
+	int			 port;
+	int			 fd;
+	struct sockaddr_storage	 ss;
+};
+
 struct dequeue {
-	TAILQ_HEAD(graphite_addrs, graphite_addr)	 graphite_addrs;
-	struct amqp					*amqp;
+	struct graphite	*graphite;
+	struct amqp	*amqp;
 };
 
 /* prototypes */
