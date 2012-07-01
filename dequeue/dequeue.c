@@ -212,8 +212,23 @@ main(int argc, char *argv[])
 			while (graphite_open(env->graphite) == -1)
 				sleep(1);
 
-		if ((tag = amqp_consume(env->amqp, &key, &buf, &len)) < 0)
-			fatalx("amqp_consume");
+		/* Reconnect to AMQP */
+		if (env->amqp->c == NULL) {
+			while (amqp_open(env->amqp) != 0)
+				sleep(1);
+			if (amqp_exchange(env->amqp) != 0 ||
+			    amqp_queue(env->amqp) != 0) {
+				amqp_close(env->amqp);
+				sleep(1);
+				continue;
+			}
+		}
+
+		if ((tag = amqp_consume(env->amqp, &key, &buf, &len)) < 0) {
+			log_warnx("amqp_consume");
+			amqp_close(env->amqp);
+			continue;
+		}
 
 		/* Count how many lines (metrics) are in this message */
 		lines = 1;
@@ -289,8 +304,11 @@ main(int argc, char *argv[])
 			j++;
 		}
 		if (i < lines) {
-			amqp_reject(env->amqp, tag, 0);
-			log_debug("message rejected");
+			if (amqp_reject(env->amqp, tag, 0) != 0) {
+				log_warnx("unable to reject");
+				amqp_close(env->amqp);
+			} else
+				log_debug("message rejected");
 		} else {
 			/* Go go gadget writev
 			 *
@@ -301,12 +319,19 @@ main(int argc, char *argv[])
 			if ((bytes = writev(env->graphite->fd, data, j)) == -1) {
 				log_warn("writev");
 				/* Reject and re-queue */
-				amqp_reject(env->amqp, tag, 1);
+				if (amqp_reject(env->amqp, tag, 1) != 0) {
+					log_warnx("unable to requeue");
+					amqp_close(env->amqp);
+				} else
+					log_debug("message requeued");
 				graphite_close(env->graphite);
 			} else {
-				amqp_acknowledge(env->amqp, tag);
-				log_debug("message accepted, %d bytes written to graphite",
-				    bytes);
+				if (amqp_acknowledge(env->amqp, tag) != 0) {
+					log_warnx("unable to ack");
+					amqp_close(env->amqp);
+				} else
+					log_debug("message accepted, %d bytes written to graphite",
+					    bytes);
 			}
 		}
 
