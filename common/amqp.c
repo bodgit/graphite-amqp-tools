@@ -290,7 +290,7 @@ amqp_consume(struct amqp *env, char **key, char **buf, size_t *len)
 	return (d->delivery_tag);
 }
 
-void
+int
 amqp_publish(struct amqp *env, char *key, char *data)
 {
 	amqp_bytes_t		 msg;
@@ -305,21 +305,26 @@ amqp_publish(struct amqp *env, char *key, char *data)
 
 	log_debug("publishing %d bytes", strlen(data));
 
-	amqp_basic_publish(env->c, AMQP_DEFAULT_CHANNEL,
+	if (amqp_log_error(amqp_basic_publish(env->c, AMQP_DEFAULT_CHANNEL,
 	    amqp_cstring_bytes(env->exchange), amqp_cstring_bytes(key), 0, 0,
-	    &p, msg);
+	    &p, msg)) != 0)
+		return (-1);
+
+	return (0);
 }
 
-void
+int
 amqp_acknowledge(struct amqp *env, int tag)
 {
-	amqp_basic_ack(env->c, AMQP_DEFAULT_CHANNEL, tag, 0);
+	return (amqp_log_error(amqp_basic_ack(env->c, AMQP_DEFAULT_CHANNEL,
+	    tag, 0)));
 }
 
-void
+int
 amqp_reject(struct amqp *env, int tag, int requeue)
 {
-	amqp_basic_reject(env->c, AMQP_DEFAULT_CHANNEL, tag, requeue);
+	return (amqp_log_error(amqp_basic_reject(env->c, AMQP_DEFAULT_CHANNEL,
+	    tag, requeue)));
 }
 
 void
@@ -329,4 +334,5 @@ amqp_close(struct amqp *env)
 	    AMQP_REPLY_SUCCESS));
 	amqp_log_amqp_error(amqp_connection_close(env->c, AMQP_REPLY_SUCCESS));
 	amqp_log_error(amqp_destroy_connection(env->c));
+	env->c = NULL;
 }
