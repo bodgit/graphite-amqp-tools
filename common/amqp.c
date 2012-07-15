@@ -191,7 +191,8 @@ amqp_queue(struct amqp *env)
 	t.entries = e;
 
 	amqp_queue_declare(env->c, AMQP_DEFAULT_CHANNEL,
-	    amqp_cstring_bytes(env->queue), 0, 1, 0, 0,
+	    amqp_cstring_bytes(env->queue), 0,
+	    (env->flags & AMQP_FLAG_TRANSIENT_QUEUE) ? 0 : 1, 0, 0,
 	    (i > 0) ? t : amqp_empty_table);
 	if (amqp_log_amqp_error(amqp_get_rpc_reply(env->c)) != 0)
 		goto bad;

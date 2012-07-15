@@ -88,7 +88,7 @@ typedef struct {
 %token	GRAPHITE
 %token	AMQP VHOST USER PASSWORD
 %token	EXCHANGE TYPE FEDERATED
-%token	QUEUE MIRRORED TTL PREFETCH
+%token	QUEUE TRANSIENT MIRRORED TTL PREFETCH
 %token	BINDING
 %token	METRICLOCATION
 %token	PORT
@@ -105,6 +105,7 @@ typedef struct {
 %type	<v.opts>		password
 %type	<v.opts>		type
 %type	<v.opts>		federated
+%type	<v.opts>		transient
 %type	<v.opts>		mirrored
 %type	<v.opts>		ttl
 %type	<v.opts>		prefetch
@@ -230,7 +231,8 @@ queue_opts	:	{ opts_default(); }
 queue_opts_l	: queue_opts_l queue_opt
 		| queue_opt
 		;
-queue_opt	: mirrored
+queue_opt	: transient
+		| mirrored
 		| prefetch
 		| ttl
 		;
@@ -273,6 +275,11 @@ type		: TYPE STRING {
 
 federated	: FEDERATED STRING {
 			opts.upstreams = $2;
+		}
+		;
+
+transient	: TRANSIENT {
+			opts.flags |= AMQP_FLAG_TRANSIENT_QUEUE;
 		}
 		;
 
@@ -359,6 +366,7 @@ lookup(char *s)
 		{ "port",		PORT},
 		{ "prefetch",		PREFETCH},
 		{ "queue",		QUEUE},
+		{ "transient",		TRANSIENT},
 		{ "ttl",		TTL},
 		{ "type",		TYPE},
 		{ "user",		USER},

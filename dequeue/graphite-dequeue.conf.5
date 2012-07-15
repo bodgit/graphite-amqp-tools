@@ -92,6 +92,7 @@ exchange type respectively.
 .Pp
 .It Xo
 .Ic queue Ar string
+.Op Ic transient
 .Op Ic mirrored
 .Op Ic ttl Ar milliseconds
 .Op Ic prefetch Ar count
@@ -99,6 +100,9 @@ exchange type respectively.
 Specify the
 .Ar queue
 that will be created and bound to the exchange.
+Adding the
+.Ic transient
+option will mark the queue as transient/non-durable.
 Adding the
 .Ic mirrored
 option will pass the
