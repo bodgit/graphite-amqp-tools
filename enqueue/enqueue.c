@@ -251,7 +251,7 @@ main(int argc, char *argv[])
 			    htons(la->port);
 			break;
 		default:
-			fatalx("");
+			fatalx("invalid address family");
 		}
 
 		log_info("listening on %s:%d",
