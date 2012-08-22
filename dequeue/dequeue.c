@@ -21,6 +21,7 @@
 #include <unistd.h>
 #include <err.h>
 #include <pwd.h>
+#include <signal.h>
 
 #include "dequeue.h"
 
@@ -28,6 +29,8 @@
 #define	NEWLINE	"\n"
 
 __dead void	 usage(void);
+int		 graphite_open(struct graphite *);
+void		 graphite_close(struct graphite *);
 
 __dead void
 usage(void)
@@ -36,6 +39,67 @@ usage(void)
 
 	fprintf(stderr, "usage: %s [-dnv] [-f file]\n", __progname);
 	exit(1);
+}
+
+int
+graphite_open(struct graphite *env)
+{
+	struct dequeue_addr	*h = NULL, *next;
+
+	if (host(env->host, &h) == -1)
+		log_warnx("could not parse address spec \"%s\"", env->host);
+
+	if (h == NULL &&
+	    (host_dns(env->host, &h) == -1 || !h))
+		log_warnx("could not resolve \"%s\"", env->host);
+
+	for (; h != NULL; h = next) {
+		next = h->next;
+
+		switch (h->ss.ss_family) {
+		case AF_INET:
+			((struct sockaddr_in *)&h->ss)->sin_port =
+			    htons(env->port);
+			break;
+		case AF_INET6:
+			((struct sockaddr_in6 *)&h->ss)->sin6_port =
+			    htons(env->port);
+			break;
+		default:
+			fatalx("invalid address family");
+		}
+
+		log_info("connecting to %s:%d",
+		    log_sockaddr((struct sockaddr *)&h->ss), env->port);
+
+		if ((env->fd = socket(h->ss.ss_family, SOCK_STREAM, 0)) == -1)
+			fatal("socket");
+
+		if (connect(env->fd, (struct sockaddr *)&h->ss,
+		    SA_LEN((struct sockaddr *)&h->ss)) == -1) {
+			log_warn("connect to %s failed, skipping",
+			    log_sockaddr((struct sockaddr *)&h->ss));
+			close(env->fd);
+			env->fd = -1;
+			free(h);
+			continue;
+		}
+
+		break;
+	}
+	/* Free up any outstanding addresses we didn't need to try */
+	for (; h != NULL; h = next) {
+		next = h->next;
+		free(h);
+	}
+	return (env->fd);
+}
+
+void
+graphite_close(struct graphite *env)
+{
+	close(env->fd);
+	env->fd = -1;
 }
 
 int
@@ -58,9 +122,6 @@ main(int argc, char *argv[])
 	char		**line;
 	struct iovec	 *data;
 	ssize_t		  bytes;
-
-	struct graphite_addr	*ga;
-	int			 fd;
 
 	log_init(1);	/* log to stderr until daemonized */
 
@@ -112,40 +173,6 @@ main(int argc, char *argv[])
 			err(1, "failed to daemonize");
 	}
 
-	for (ga = TAILQ_FIRST(&env->graphite_addrs); ga; ) {
-		switch (ga->sa.ss_family) {
-		case AF_INET:
-			((struct sockaddr_in *)&ga->sa)->sin_port =
-			    htons(ga->port);
-			break;
-		case AF_INET6:
-			((struct sockaddr_in6 *)&ga->sa)->sin6_port =
-			    htons(ga->port);
-			break;
-		default:
-			fatalx("");
-		}
-
-		log_info("connecting to %s:%d",
-		    log_sockaddr((struct sockaddr *)&ga->sa), ga->port);
-
-		if ((fd = socket(ga->sa.ss_family, SOCK_STREAM, 0)) == -1)
-			fatal("socket");
-
-		if (connect(fd, (struct sockaddr *)&ga->sa,
-		    SA_LEN((struct sockaddr *)&ga->sa)) == -1) {
-			log_warn("connect to %s failed, skipping",
-			    log_sockaddr((struct sockaddr *)&ga->sa));
-			close(fd);
-			ga = TAILQ_NEXT(ga, entry);
-			continue;
-		}
-
-		break;
-	}
-	if (ga == NULL)
-		fatalx("could not connect to graphite host");
-
 	log_info("startup");
 
 #if 0
@@ -165,6 +192,8 @@ main(int argc, char *argv[])
 		fatal("cannot drop privileges");
 #endif
 
+	signal(SIGPIPE, SIG_IGN);
+
 	if (amqp_open(env->amqp) != 0)
 		fatalx("amqp_open");
 	if (amqp_exchange(env->amqp) != 0)
@@ -172,11 +201,34 @@ main(int argc, char *argv[])
 	if (amqp_queue(env->amqp) != 0)
 		fatalx("amqp_queue");
 
+	if (graphite_open(env->graphite) == -1)
+		fatalx("graphite_open");
+
 	/* At this point, we are ready to consume messages in some sort of loop
 	 */
 	while (1) {
-		if ((tag = amqp_consume(env->amqp, &key, &buf, &len)) < 0)
-			fatalx("amqp_consume");
+		/* Reconnect to graphite */
+		if (env->graphite->fd == -1)
+			while (graphite_open(env->graphite) == -1)
+				sleep(1);
+
+		/* Reconnect to AMQP */
+		if (env->amqp->c == NULL) {
+			while (amqp_open(env->amqp) != 0)
+				sleep(1);
+			if (amqp_exchange(env->amqp) != 0 ||
+			    amqp_queue(env->amqp) != 0) {
+				amqp_close(env->amqp);
+				sleep(1);
+				continue;
+			}
+		}
+
+		if ((tag = amqp_consume(env->amqp, &key, &buf, &len)) < 0) {
+			log_warnx("amqp_consume");
+			amqp_close(env->amqp);
+			continue;
+		}
 
 		/* Count how many lines (metrics) are in this message */
 		lines = 1;
@@ -252,18 +304,34 @@ main(int argc, char *argv[])
 			j++;
 		}
 		if (i < lines) {
-			amqp_reject(env->amqp, tag, 0);
-			log_debug("message rejected");
+			if (amqp_reject(env->amqp, tag, 0) != 0) {
+				log_warnx("unable to reject");
+				amqp_close(env->amqp);
+			} else
+				log_debug("message rejected");
 		} else {
-			/* Go go gadget writev */
-			if ((bytes = writev(fd, data, j)) == -1) {
+			/* Go go gadget writev
+			 *
+			 * XXX If the remote end has disappeared, the writev
+			 *     may still succeed before it starts failing so
+			 *     there is a risk a metric can be lost here
+			 */
+			if ((bytes = writev(env->graphite->fd, data, j)) == -1) {
 				log_warn("writev");
-				amqp_reject(env->amqp, tag, 1);
-				/* FIXME retry/reconnect logic here */
+				/* Reject and re-queue */
+				if (amqp_reject(env->amqp, tag, 1) != 0) {
+					log_warnx("unable to requeue");
+					amqp_close(env->amqp);
+				} else
+					log_debug("message requeued");
+				graphite_close(env->graphite);
 			} else {
-				amqp_acknowledge(env->amqp, tag);
-				log_debug("message accepted, %d bytes written to graphite",
-				    bytes);
+				if (amqp_acknowledge(env->amqp, tag) != 0) {
+					log_warnx("unable to ack");
+					amqp_close(env->amqp);
+				} else
+					log_debug("message accepted, %d bytes written to graphite",
+					    bytes);
 			}
 		}
 
