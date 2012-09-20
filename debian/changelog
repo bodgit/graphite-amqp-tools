@@ -1,0 +1,5 @@
+graphite-amqp-tools (0.1-1ubuntu1) precise; urgency=low
+
+  * Initial release 
+
+ -- David Gillies <dgillies@brandscreen.com>  Thu, 20 Sep 2012 03:12:16 +0000
