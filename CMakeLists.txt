@@ -3,10 +3,11 @@ cmake_minimum_required(VERSION 2.8.8)
 project(graphite-amqp-tools C)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations -Wshadow -Wpointer-arith -Wcast-qual -Wsign-compare")
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 include(FindBISON)
 include(FindPkgConfig)
-pkg_check_modules(RABBITMQ REQUIRED librabbitmq>=0.2.0)
+pkg_check_modules(RABBITMQ REQUIRED librabbitmq>=0.2)
 pkg_check_modules(EVENT REQUIRED libevent>=2)
 
 find_program(GZIP_TOOL
@@ -42,7 +43,7 @@ add_custom_target(dist
 
 include_directories(
 	${CMAKE_CURRENT_BINARY_DIR}
-	common
+	${CMAKE_CURRENT_SOURCE_DIR}/common
 	${RABBITMQ_INCLUDE_DIRS}
 	${EVENT_INCLUDE_DIRS}
 )

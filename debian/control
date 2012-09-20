@@ -1,0 +1,13 @@
+Source: graphite-amqp-tools
+Priority: extra
+Maintainer: David Gillies <dgillies@brandscreen.com>
+Build-Depends: debhelper (>= 7.0.0), cmake (>= 2.8.8), librabbitmq-dev (>= 0.2.0)
+Standards-Version: 3.9.2
+Section: libs
+Homepage: http://www.collectd.org/
+
+Package: graphite-amqp-tools
+Section: libs
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, librabbitmq (>= 0.2.0)
+Description: A set of tools for getting Graphite data in and out of AMQP message brokers
