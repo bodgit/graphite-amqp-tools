@@ -42,17 +42,17 @@ graphite_parse(char *key, char *line)
 		 */
 		if (strspn(key, LOWER UPPER DIGITS UNDERSCORE MINUS PERIOD) !=
 		    strlen(key))
-			goto bad;
+			goto bad_route_key;
 	} else {
 		/* Scan the metric key, make a note of how long it is */
 		if ((len = strspn(ptr,
 		    LOWER UPPER DIGITS UNDERSCORE MINUS PERIOD)) == 0)
-			goto bad;
+			goto bad_metric_key;
 		ptr += klen = len;
 
 		/* Scan the spaces after the metric key */
 		if ((len = strspn(ptr, SPACE)) == 0)
-			goto bad;
+			goto bad_spaces;
 		/* Remove any duplicate spaces */
 		if (len > 1)
 			memmove(ptr + 1, ptr + len, strlen(ptr + len) + 1);
@@ -63,12 +63,13 @@ graphite_parse(char *key, char *line)
 
 	/* Scan the metric value */
 	if ((len = strspn(ptr, DIGITS MINUS PERIOD)) == 0)
-		goto bad;
+		goto bad_metric_value;
 	ptr += len;
 
 	/* Scan the spaces after the metric value */
 	if ((len = strspn(ptr, SPACE)) == 0)
-		goto bad;
+		goto bad_metric_space;
+
 	/* Remove any duplicate spaces */
 	if (len > 1)
 		memmove(ptr + 1, ptr + len, strlen(ptr + len) + 1);
@@ -76,7 +77,7 @@ graphite_parse(char *key, char *line)
 
 	/* Scan the metric timestamp */
 	if ((len = strspn(ptr, DIGITS)) == 0)
-		goto bad;
+		goto bad_timestamp;
 	ptr += len;
 
 	/* If we reached the end and yet don't have a null, there's extra
@@ -88,7 +89,33 @@ graphite_parse(char *key, char *line)
 	}
 
 	return (klen);
+
 bad:
 	log_warnx("Something wrong");
 	return (-1);
+
+bad_route_key:
+	log_warnx("Bad message routing key: \"%s\"", ptr);
+	return (-1);
+
+bad_metric_key:
+	log_warnx("Bad metric key: \"%s\"", ptr);
+	return (-1);
+
+bad_spaces:
+	log_warnx("Spaces found in metric key: \"%s\"", ptr);
+	return (-1);
+
+bad_metric_value:
+	log_warnx("Bad metric value: \"%s\"", ptr);
+	return (-1);
+
+bad_metric_space:
+	log_warnx("Spaces found in metric value: \"%s\"", ptr);
+	return (-1);
+
+bad_timestamp:
+	log_warnx("Bad timestamp: \"%s\"", ptr);
+	return (-1);
+
 }

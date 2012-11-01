@@ -76,10 +76,9 @@ struct binding	*init_binding(void);
 #define YYSTYPE_IS_DECLARED 1
 typedef struct {
 	union {
-		int64_t				 number;
-		char				*string;
-		struct dequeue_addr_wrap	*addr;
-		struct opts			 opts;
+		int64_t		 number;
+		char		*string;
+		struct opts	 opts;
 	} v;
 	int lineno;
 } YYSTYPE;
@@ -96,7 +95,6 @@ typedef struct {
 %token	ERROR
 %token	<v.string>		STRING
 %token	<v.number>		NUMBER
-%type	<v.addr>		address
 %type	<v.opts>		amqp_opts amqp_opts_l amqp_opt
 %type	<v.opts>		exchange_opts exchange_opts_l exchange_opt
 %type	<v.opts>		graphite_opts graphite_opts_l graphite_opt
@@ -118,36 +116,16 @@ grammar		: /* empty */
 		| grammar error '\n'		{ file->errors++; }
 		;
 
-main		: GRAPHITE address graphite_opts	{
-			struct graphite_addr	*ga;
-			struct dequeue_addr	*h, *next;
-
-			if ((h = $2->a) == NULL &&
-			    (host_dns($2->name, &h) == -1 || !h)) {
-				yyerror("could not resolve \"%s\"", $2->name);
-				free($2->name);
-				free($2);
-				YYERROR;
-			}
-
-			for (; h != NULL; h = next) {
-				next = h->next;
-				ga = calloc(1, sizeof(struct graphite_addr));
-				if (ga == NULL)
-					fatal("graphite calloc");
-				ga->fd = -1;
-				ga->port =
-				    (opts.port) ? opts.port : GRAPHITE_DEFAULT_PORT;
-				memcpy(&ga->sa, &h->ss,
-				    sizeof(struct sockaddr_storage));
-				TAILQ_INSERT_TAIL(&conf->graphite_addrs, ga,
-				    entry);
-				free(h);
-			}
-			free($2->name);
-			free($2);
+main		: GRAPHITE STRING graphite_opts	{
+			if (conf->graphite->host)
+				free(conf->graphite->host);
+			conf->graphite->host = $2;
+			conf->graphite->port =
+			    (opts.port) ? opts.port : GRAPHITE_DEFAULT_PORT;
 		}
 		| AMQP STRING amqp_opts			{
+			if (conf->amqp->host)
+				free(conf->amqp->host);
 			conf->amqp->host = $2;
 			conf->amqp->port = opts.port;
 
@@ -204,21 +182,6 @@ main		: GRAPHITE address graphite_opts	{
 				YYERROR;
 			}
 			free($2);
-		}
-		;
-
-address		: STRING		{
-			if (($$ = calloc(1, sizeof(struct dequeue_addr_wrap))) ==
-			    NULL)
-				fatal(NULL);
-			if (host($1, &$$->a) == -1) {
-				yyerror("could not parse address spec \"%s\"",
-				    $1);
-				free($1);
-				free($$);
-				YYERROR;
-			}
-			$$->name = $1;
 		}
 		;
 
@@ -681,7 +644,10 @@ parse_config(const char *filename, int flags)
 		return (NULL);
 	}
 
-	TAILQ_INIT(&conf->graphite_addrs);
+	if ((conf->graphite = calloc(1, sizeof(struct graphite))) == NULL) {
+		log_warn("cannot allocate memory");
+		return (NULL);
+	}
 
 	if ((file = pushfile(filename)) == NULL) {
 		free(conf);
@@ -702,9 +668,11 @@ parse_config(const char *filename, int flags)
 	 */
 
 	/* Graphite */
-	//if (conf->graphite_host)
-	//if (conf->graphite_port == 0)
-	//	conf->graphite_port = GRAPHITE_DEFAULT_PORT;
+	if (conf->graphite->host == NULL)
+		if ((conf->graphite->host = strdup(GRAPHITE_DEFAULT_HOST)) == NULL)
+			fatal("strdup");
+	if (conf->graphite->port == 0)
+		conf->graphite->port = GRAPHITE_DEFAULT_PORT;
 
 	/* AMQP host/login */
 	if (conf->amqp->host == NULL)
