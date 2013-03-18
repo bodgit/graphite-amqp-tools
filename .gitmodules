@@ -1,0 +1,3 @@
+[submodule "stomp"]
+	path = stomp
+	url = git@github.com:bodgit/libevent-stomp.git

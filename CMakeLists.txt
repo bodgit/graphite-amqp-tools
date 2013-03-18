@@ -7,7 +7,6 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 include(FindBISON)
 include(FindPkgConfig)
-pkg_check_modules(RABBITMQ REQUIRED librabbitmq>=0.2)
 pkg_check_modules(EVENT REQUIRED libevent>=2)
 
 find_program(GZIP_TOOL
@@ -44,15 +43,15 @@ add_custom_target(dist
 include_directories(
 	${CMAKE_CURRENT_BINARY_DIR}
 	${CMAKE_CURRENT_SOURCE_DIR}/common
-	${RABBITMQ_INCLUDE_DIRS}
+	${CMAKE_CURRENT_SOURCE_DIR}/stomp
 	${EVENT_INCLUDE_DIRS}
 )
 
 link_directories(
-	${RABBITMQ_LIBRARY_DIRS}
 	${EVENT_LIBRARY_DIRS}
 )
 
 add_subdirectory(common)
+add_subdirectory(stomp)
 add_subdirectory(enqueue)
 add_subdirectory(dequeue)

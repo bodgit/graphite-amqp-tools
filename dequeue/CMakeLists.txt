@@ -14,11 +14,12 @@ add_executable(graphite-dequeue
 	dequeue.c
 	${BISON_PARSER_OUTPUTS}
 	$<TARGET_OBJECTS:common>
+	$<TARGET_OBJECTS:stomp>
 	${DEQUEUE_MANS_COMPRESSED}
 )
 
 target_link_libraries(graphite-dequeue
-	${RABBITMQ_LIBRARIES}
+	${EVENT_LIBRARIES}
 )
 
 install(TARGETS graphite-dequeue

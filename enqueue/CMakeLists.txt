@@ -14,11 +14,11 @@ add_executable(graphite-enqueue
 	enqueue.c
 	${BISON_PARSER_OUTPUTS}
 	$<TARGET_OBJECTS:common>
+	$<TARGET_OBJECTS:stomp>
 	${ENQUEUE_MANS_COMPRESSED}
 )
 
 target_link_libraries(graphite-enqueue
-	${RABBITMQ_LIBRARIES}
 	${EVENT_LIBRARIES}
 )
 
