@@ -1,3 +1,6 @@
 [submodule "stomp"]
 	path = stomp
 	url = git@github.com:bodgit/libevent-stomp.git
+[submodule "graphite"]
+	path = graphite
+	url = git@github.com:bodgit/libevent-graphite.git
