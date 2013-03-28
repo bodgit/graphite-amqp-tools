@@ -1,3 +1,4 @@
 parse.c
+parse.h
 graphite-enqueue
 *.gz
