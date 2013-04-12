@@ -15,11 +15,13 @@ add_executable(graphite-dequeue
 	${BISON_PARSER_OUTPUTS}
 	$<TARGET_OBJECTS:common>
 	$<TARGET_OBJECTS:stomp>
+	$<TARGET_OBJECTS:graphite>
 	${DEQUEUE_MANS_COMPRESSED}
 )
 
 target_link_libraries(graphite-dequeue
 	${EVENT_LIBRARIES}
+	${OPENSSL_LIBRARIES}
 )
 
 install(TARGETS graphite-dequeue

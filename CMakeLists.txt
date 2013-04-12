@@ -2,12 +2,14 @@ cmake_minimum_required(VERSION 2.8.8)
 
 project(graphite-amqp-tools C)
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations -Wshadow -Wpointer-arith -Wcast-qual -Wsign-compare")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -Wall -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations -Wshadow -Wpointer-arith -Wcast-qual -Wsign-compare")
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 include(FindBISON)
 include(FindPkgConfig)
-pkg_check_modules(EVENT REQUIRED libevent>=2)
+pkg_check_modules(EVENT REQUIRED libevent_openssl>=2)
+pkg_check_modules(OPENSSL REQUIRED openssl)
+pkg_check_modules(PCRE REQUIRED libpcre)
 
 find_program(GZIP_TOOL
 	NAMES gzip
@@ -44,14 +46,21 @@ include_directories(
 	${CMAKE_CURRENT_BINARY_DIR}
 	${CMAKE_CURRENT_SOURCE_DIR}/common
 	${CMAKE_CURRENT_SOURCE_DIR}/stomp
+	${CMAKE_CURRENT_SOURCE_DIR}/graphite
 	${EVENT_INCLUDE_DIRS}
+	${OPENSSL_INCLUDE_DIRS}
+	${PCRE_INCLUDE_DIRS}
 )
 
 link_directories(
 	${EVENT_LIBRARY_DIRS}
+	${OPENSSL_LIBRARY_DIRS}
+	${PCRE_LIBRARY_DIRS}
 )
 
 add_subdirectory(common)
 add_subdirectory(stomp)
+add_subdirectory(graphite)
 add_subdirectory(enqueue)
 add_subdirectory(dequeue)
+add_subdirectory(rewrite)

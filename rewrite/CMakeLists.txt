@@ -1,5 +1,5 @@
-set(ENQUEUE_MANS graphite-enqueue.8 graphite-enqueue.conf.5)
-set(ENQUEUE_MANS_COMPRESSED graphite-enqueue.8.gz graphite-enqueue.conf.5.gz)
+set(REWRITE_MANS graphite-rewrite.8 graphite-rewrite.conf.5)
+set(REWRITE_MANS_COMPRESSED graphite-rewrite.8.gz graphite-rewrite.conf.5.gz)
 
 foreach(man ${ENQUEUE_MANS})
 	add_custom_command(OUTPUT ${man}.gz
@@ -8,33 +8,34 @@ foreach(man ${ENQUEUE_MANS})
 		COMMENT "Building ${man}.gz")
 endforeach()
 
-bison_target(PARSER ${CMAKE_CURRENT_SOURCE_DIR}/parse.y ${CMAKE_CURRENT_BINARY_DIR}/parse.c)
+#bison_target(PARSER ${CMAKE_CURRENT_SOURCE_DIR}/parse.y ${CMAKE_CURRENT_BINARY_DIR}/parse.c)
 
-add_executable(graphite-enqueue
-	enqueue.c
-	${BISON_PARSER_OUTPUTS}
+add_executable(graphite-rewrite
+	rewrite.c
+	#${BISON_PARSER_OUTPUTS}
 	$<TARGET_OBJECTS:common>
 	$<TARGET_OBJECTS:stomp>
 	$<TARGET_OBJECTS:graphite>
 	${ENQUEUE_MANS_COMPRESSED}
 )
 
-target_link_libraries(graphite-enqueue
+target_link_libraries(graphite-rewrite
 	${EVENT_LIBRARIES}
 	${OPENSSL_LIBRARIES}
+	${PCRE_LIBRARIES}
 )
 
-install(TARGETS graphite-enqueue
+install(TARGETS graphite-rewrite
 	DESTINATION "sbin"
 	PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/graphite-enqueue.conf
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/graphite-rewrite.conf
 	DESTINATION "/etc"
 	PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ)
 
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/graphite-enqueue.8.gz
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/graphite-rewrite.8.gz
 	DESTINATION "share/man/man8"
 	PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/graphite-enqueue.conf.5.gz
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/graphite-rewrite.conf.5.gz
 	DESTINATION "share/man/man5"
 	PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)

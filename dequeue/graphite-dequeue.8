@@ -17,14 +17,14 @@
 .Os
 .Sh NAME
 .Nm graphite-dequeue
-.Nd AMQP to Graphite daemon
+.Nd STOMP to Graphite daemon
 .Sh SYNOPSIS
 .Nm graphite-dequeue
 .Op Fl dnv
 .Op Fl f Ar file
 .Sh DESCRIPTION
 .Nm
-is a daemon which reads Graphite metrics from a queue on an AMQP message
+is a daemon which reads Graphite metrics from a queue on an STOMP message
 broker and posts them to a Graphite server using the
 .Sq TCP line receiver
 protocol.

@@ -21,36 +21,64 @@
 #include <string.h>
 
 #include "common.h"
+#include "stomp.h"
+#include "graphite.h"
 
-#define	DEQUEUE_CONF_FILE	"/etc/graphite-dequeue.conf"
-#define	DEQUEUE_USER		"_dequeue"
+#define	DEQUEUE_CONF_FILE		"/etc/graphite-dequeue.conf"
+#define	DEQUEUE_USER			"_dequeue"
 
-struct graphite_addr {
-	TAILQ_ENTRY(graphite_addr)	 entry;
-	struct sockaddr_storage		 sa;
-	int				 fd;
-	int				 port;
-};
+#define	DEQUEUE_GRAPHITE_CONNECTED	(1 << 0)
+#define	DEQUEUE_STOMP_CONNECTED		(1 << 1)
 
-struct dequeue_addr {
-	struct dequeue_addr	*next;
-	struct sockaddr_storage	 ss;
-};
-
-struct dequeue_addr_wrap {
-	char			*name;
-	struct dequeue_addr	*a;
+struct stomp_sub {
+	struct dequeue			*env;
+	char				*path;
+	int				 ack;
+	struct event			*ack_ev;
+	struct timeval			 ack_tv;
+	char				*ack_pending;
+	struct stomp_subscription	*subscription;
+	
+	TAILQ_ENTRY(stomp_sub)		 entry;
 };
 
 struct dequeue {
-	TAILQ_HEAD(graphite_addrs, graphite_addr)	 graphite_addrs;
-	struct amqp					*amqp;
+	struct event_base			*base;
+
+	int					 state;
+
+	char					*graphite_host;
+	unsigned short				 graphite_port;
+	struct timeval				 graphite_reconnect;
+
+	struct graphite_connection		*graphite_conn;
+
+	char					*stomp_host;
+	unsigned short				 stomp_port;
+	char					*stomp_vhost;
+	char					*stomp_user;
+	char					*stomp_password;
+	int					 stomp_version;
+	long long				 stomp_heartbeat;
+	struct timeval				 stomp_reconnect;
+	int					 stomp_flags;
+
+	TAILQ_HEAD(stomp_subs, stomp_sub)	 stomp_subs;
+
+	struct stomp_connection			*stomp_conn;
+
+	char					*stats_host;
+	unsigned short				 stats_port;
+	struct timeval				 stats_reconnect;
+	struct timeval				 stats_interval;
+	char					*stats_prefix;
+
+	struct graphite_connection		*stats_conn;
+	struct event				*stats_ev;
 };
 
 /* prototypes */
 /* parse.y */
 struct dequeue	*parse_config(const char *, int);
-int		 host(const char *, struct dequeue_addr **);
-int		 host_dns(const char *, struct dequeue_addr **);
 
 #endif

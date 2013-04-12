@@ -14,8 +14,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/uio.h>
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -24,10 +22,19 @@
 
 #include "dequeue.h"
 
-#define	SPACE	" "
-#define	NEWLINE	"\n"
-
 __dead void	 usage(void);
+void		 check_state(struct dequeue *);
+void		 graphite_connect_cb(struct graphite_connection *, void *);
+void		 graphite_disconnect_cb(struct graphite_connection *, void *);
+void		 stats_connect_cb(struct graphite_connection *, void *);
+void		 stats_timer_cb(int, short, void *);
+void		 stats_disconnect_cb(struct graphite_connection *, void *);
+void		 stomp_connect_cb(struct stomp_connection *,
+		    struct stomp_frame *, void *);
+void		 stomp_message_cb(struct stomp_connection *,
+		    struct stomp_subscription *, struct stomp_frame *, void *);
+void		 stomp_ack_cb(int, short, void *);
+void		 stomp_disconnect_cb(struct stomp_connection *, void *);
 
 __dead void
 usage(void)
@@ -38,29 +45,368 @@ usage(void)
 	exit(1);
 }
 
+void
+check_state(struct dequeue *env)
+{
+	struct stomp_sub	*sub;
+
+	log_debug("State: Graphite (%s), STOMP (%s)",
+	    (env->state & DEQUEUE_GRAPHITE_CONNECTED) ? "Up" : "Down",
+	    (env->state & DEQUEUE_STOMP_CONNECTED) ? "Up" : "Down");
+
+	if (!(env->state & DEQUEUE_STOMP_CONNECTED))
+		return;
+
+	for (sub = TAILQ_FIRST(&env->stomp_subs); sub;
+	    sub = TAILQ_NEXT(sub, entry))
+		if (env->state & DEQUEUE_GRAPHITE_CONNECTED) {
+			sub->subscription = stomp_subscription_new(env->stomp_conn,
+			    sub->path, sub->ack);
+			stomp_subscription_setcb(sub->subscription,
+			    stomp_message_cb, (void *)sub);
+			stomp_subscribe(env->stomp_conn, sub->subscription);
+		} else if (sub->subscription) {
+			stomp_unsubscribe(env->stomp_conn, sub->subscription);
+			stomp_subscription_free(sub->subscription);
+			sub->subscription = NULL;
+		}
+}
+
+void
+graphite_connect_cb(struct graphite_connection *c, void *arg)
+{
+	struct dequeue	*env = (struct dequeue *)arg;
+
+	env->state |= DEQUEUE_GRAPHITE_CONNECTED;
+	check_state(env);
+}
+
+void
+graphite_disconnect_cb(struct graphite_connection *c, void *arg)
+{
+	struct dequeue	*env = (struct dequeue *)arg;
+
+	env->state &= ~(DEQUEUE_GRAPHITE_CONNECTED);
+	check_state(env);
+}
+
+void
+stats_connect_cb(struct graphite_connection *c, void *arg)
+{
+	struct dequeue	*env = (struct dequeue *)arg;
+
+	log_debug("Connected to %s:%hu", env->stats_host,
+	    env->stats_port);
+
+	evtimer_add(env->stats_ev, &env->stats_interval);
+}
+
+void
+stats_timer_cb(int fd, short event, void *arg)
+{
+	struct dequeue	*env = (struct dequeue *)arg;
+	struct timeval	 tv;
+	size_t		 size;
+	char		*metric, *value, *timestamp;
+
+	gettimeofday(&tv, NULL);
+
+	size = snprintf(NULL, 0, "%ld", tv.tv_sec);
+	timestamp = calloc(size + 1, sizeof(char));
+	sprintf(timestamp, "%ld", tv.tv_sec);
+
+	size = snprintf(NULL, 0, "%s.stomp.bytes.rx", env->stats_prefix);
+	metric = calloc(size + 1, sizeof(char));
+	sprintf(metric, "%s.stomp.bytes.rx", env->stats_prefix);
+
+	size = snprintf(NULL, 0, "%lld", env->stomp_conn->bytes_rx);
+	value = calloc(size + 1, sizeof(char));
+	sprintf(value, "%lld", env->stomp_conn->bytes_rx);
+
+	graphite_send(env->stats_conn, metric, value, timestamp);
+
+	free(metric);
+	free(value);
+
+	size = snprintf(NULL, 0, "%s.stomp.bytes.tx", env->stats_prefix);
+	metric = calloc(size + 1, sizeof(char));
+	sprintf(metric, "%s.stomp.bytes.tx", env->stats_prefix);
+
+	size = snprintf(NULL, 0, "%lld", env->stomp_conn->bytes_tx);
+	value = calloc(size + 1, sizeof(char));
+	sprintf(value, "%lld", env->stomp_conn->bytes_tx);
+
+	graphite_send(env->stats_conn, metric, value, timestamp);
+
+	free(metric);
+	free(value);
+
+	size = snprintf(NULL, 0, "%s.stomp.frames.rx", env->stats_prefix);
+	metric = calloc(size + 1, sizeof(char));
+	sprintf(metric, "%s.stomp.frames.rx", env->stats_prefix);
+
+	size = snprintf(NULL, 0, "%lld", env->stomp_conn->frames_rx);
+	value = calloc(size + 1, sizeof(char));
+	sprintf(value, "%lld", env->stomp_conn->frames_rx);
+
+	graphite_send(env->stats_conn, metric, value, timestamp);
+
+	free(metric);
+	free(value);
+
+	size = snprintf(NULL, 0, "%s.stomp.frames.tx", env->stats_prefix);
+	metric = calloc(size + 1, sizeof(char));
+	sprintf(metric, "%s.stomp.frames.tx", env->stats_prefix);
+
+	size = snprintf(NULL, 0, "%lld", env->stomp_conn->frames_tx);
+	value = calloc(size + 1, sizeof(char));
+	sprintf(value, "%lld", env->stomp_conn->frames_tx);
+
+	graphite_send(env->stats_conn, metric, value, timestamp);
+
+	free(metric);
+	free(value);
+
+	size = snprintf(NULL, 0, "%s.graphite.bytes.tx", env->stats_prefix);
+	metric = calloc(size + 1, sizeof(char));
+	sprintf(metric, "%s.graphite.bytes.tx", env->stats_prefix);
+
+	size = snprintf(NULL, 0, "%lld", env->graphite_conn->bytes_tx);
+	value = calloc(size + 1, sizeof(char));
+	sprintf(value, "%lld", env->graphite_conn->bytes_tx);
+
+	graphite_send(env->stats_conn, metric, value, timestamp);
+
+	free(metric);
+	free(value);
+
+	size = snprintf(NULL, 0, "%s.graphite.metrics.tx", env->stats_prefix);
+	metric = calloc(size + 1, sizeof(char));
+	sprintf(metric, "%s.graphite.metrics.tx", env->stats_prefix);
+
+	size = snprintf(NULL, 0, "%lld", env->graphite_conn->metrics_tx);
+	value = calloc(size + 1, sizeof(char));
+	sprintf(value, "%lld", env->graphite_conn->metrics_tx);
+
+	graphite_send(env->stats_conn, metric, value, timestamp);
+
+	free(metric);
+	free(value);
+
+	free(timestamp);
+}
+
+void
+stats_disconnect_cb(struct graphite_connection *c, void *arg)
+{
+	struct dequeue	*env = (struct dequeue *)arg;
+
+	fprintf(stderr, "Stats down\n");
+
+	if (evtimer_pending(env->stats_ev, NULL))
+		evtimer_del(env->stats_ev);
+}
+
+void
+stomp_connect_cb(struct stomp_connection *c, struct stomp_frame *frame,
+    void *arg)
+{
+	struct dequeue	*env = (struct dequeue *)arg;
+
+	env->state |= DEQUEUE_STOMP_CONNECTED;
+	check_state(env);
+}
+
+void
+stomp_message_cb(struct stomp_connection *c,
+    struct stomp_subscription *subscription, struct stomp_frame *frame,
+    void *arg)
+{
+	struct stomp_sub	 *sub = (struct stomp_sub *)arg;
+	struct stomp_header	 *header;
+	char			 *ptr;
+	int			  i, j, lines;
+	char			**line;
+	size_t			  len;
+	char			**part;
+
+	/* Count how many lines (metrics) are in this message */
+	lines = 1;
+	ptr = (char *)frame->body;
+	while (*ptr != '\0') {
+		len = strcspn(ptr, "\r\n");
+		ptr += len;
+		if (*ptr != '\0') {
+			lines++;
+			while (*ptr == '\r') ptr++;
+			while (*ptr == '\n') ptr++;
+		}
+	}
+	log_debug("%d line%s in message", lines, (lines == 1) ? "" : "s");
+
+	/* Allocate array of pointers to reference each line */
+	if ((line = calloc(lines, sizeof(unsigned char *))) == NULL)
+		fatal("calloc");
+
+	/* Go through message again, this time store a pointer to
+	 * each line and replace all linebreak characters with nulls
+	 */
+	i = 0;
+	line[i] = ptr = (char *)frame->body;
+	while (*ptr != '\0') {
+		len = strcspn(ptr, "\r\n");
+		ptr += len;
+		if (*ptr != '\0') {
+			while (*ptr == '\r') *(ptr++) = '\0';
+			while (*ptr == '\n') *(ptr++) = '\0';
+			line[++i] = ptr;
+		}
+	}
+
+	/* Allocate array of pointers 3 x # of lines to store the
+	 * metric, value and timestamp on each line
+	 */
+	if ((part = calloc(lines * 3, sizeof(unsigned char *))) == NULL)
+		fatal("calloc");
+
+	for (i = j = 0; i < lines; i++) {
+
+		/* Ignore completely empty lines */
+		if (strlen(line[i]) == 0)
+			continue;
+
+		if (graphite_parse(NULL, line[i], &part[j]) < 0) {
+			log_warnx("Can't parse line \"%s\"", line[i]);
+			break;
+		}
+		j += 3;
+	}
+
+	/* If this is not auto ack, we will need the "ack" or "message-id"
+	 * header value
+	 */
+	switch (sub->ack) {
+	case STOMP_ACK_CLIENT:
+		/* FALLTHROUGH */
+	case STOMP_ACK_CLIENT_INDIVIDUAL:
+		if (((header = stomp_frame_header_find(frame, "ack")) == NULL) &&
+		    ((header = stomp_frame_header_find(frame, "message-id")) == NULL))
+			goto end;
+		break;
+	default:
+		break;
+	}
+
+	/* Parse failures, reject the message */
+	if (i < lines)
+		switch (sub->ack) {
+		case STOMP_ACK_CLIENT:
+			/* Cancel any pending ack timer */
+			if (evtimer_pending(sub->ack_ev, NULL))
+				evtimer_del(sub->ack_ev);
+			/* Acknowledge any previous messages immediately */
+			if (sub->ack_pending) {
+				log_debug("Ack previous");
+				stomp_ack(c, sub->subscription,
+				    sub->ack_pending, NULL);
+				free(sub->ack_pending);
+				sub->ack_pending = NULL;
+			}
+			/* FALLTHROUGH */
+		case STOMP_ACK_CLIENT_INDIVIDUAL:
+			/* Negatively acknowledge this message immediately */
+			log_debug("Nack");
+#if 0
+			stomp_nack(c, sub->subscription, header->value, NULL);
+#else
+			/* RabbitMQ at least seems to only redeliver messages
+			 * upon receiving a NACK so if a bad message gets into
+			 * the queue it will just cause a loop
+			 */
+			stomp_ack(c, sub->subscription, header->value, NULL);
+#endif
+			/* FALLTHROUGH */
+		default:
+			goto end;
+			/* NOTREACHED */
+			break;
+		}
+
+	/* Success, send on to Graphite and acknowledge */
+	for (i = j = 0; i < lines; i++) {
+
+		/* Ignore completely empty lines */
+		if (strlen(line[i]) == 0)
+			continue;
+
+		graphite_send(sub->env->graphite_conn,
+		    part[j + GRAPHITE_PART_METRIC],
+		    part[j + GRAPHITE_PART_VALUE],
+		    part[j + GRAPHITE_PART_TIMESTAMP]);
+		j += 3;
+	}
+	switch (sub->ack) {
+	case STOMP_ACK_CLIENT:
+		if (sub->ack_pending)
+			free(sub->ack_pending);
+		sub->ack_pending = strdup(header->value);
+		/* If we don't have an active ack timer, start it ticking */
+		if (!evtimer_pending(sub->ack_ev, NULL))
+			evtimer_add(sub->ack_ev, &sub->ack_tv);
+		break;
+	case STOMP_ACK_CLIENT_INDIVIDUAL:
+		stomp_ack(c, sub->subscription, header->value, NULL);
+		break;
+	default:
+		break;
+	}
+
+end:
+	free(part);
+	free(line);
+}
+
+void
+stomp_ack_cb(int fd, short event, void *arg)
+{
+	struct stomp_sub	*sub = (struct stomp_sub *)arg;
+
+	log_debug("ACK timer fired for subscription #%s",
+	    sub->subscription->id);
+	stomp_ack(sub->env->stomp_conn, sub->subscription, sub->ack_pending,
+	    NULL);
+	free(sub->ack_pending);
+	sub->ack_pending = NULL;
+}
+
+void
+stomp_disconnect_cb(struct stomp_connection *c, void *arg)
+{
+	struct dequeue		*env = (struct dequeue *)arg;
+	struct stomp_sub	*sub;
+
+	env->state &= ~(DEQUEUE_STOMP_CONNECTED);
+
+	/* FIXME Need to clear down all of the subscription state */
+	for (sub = TAILQ_FIRST(&env->stomp_subs); sub;
+	    sub = TAILQ_NEXT(sub, entry));
+
+	check_state(env);
+}
+
 int
 main(int argc, char *argv[])
 {
-	int		  c;
-	int		  debug = 0;
-	int		  noaction = 0;
-	const char	 *conffile = DEQUEUE_CONF_FILE;
-	//u_int		  flags = 0;
-	struct passwd	 *pw;
+	int			  c;
+	int			  debug = 0;
+	int			  noaction = 0;
+	const char		 *conffile = DEQUEUE_CONF_FILE;
+	//u_int			  flags = 0;
+	//struct passwd		 *pw;
 
-	size_t		  len;
-	struct dequeue	 *env;
-	int		  tag;
-	char		 *buf = NULL;
-	char		 *key = NULL;
-	char		 *ptr;
-	int		  i, j, lines;
-	char		**line;
-	struct iovec	 *data;
-	ssize_t		  bytes;
-
-	struct graphite_addr	*ga;
-	int			 fd;
+	struct dequeue		 *env;
+	SSL_CTX			 *ctx;
+	struct stomp_sub	 *sub;
 
 	log_init(1);	/* log to stderr until daemonized */
 
@@ -112,39 +458,45 @@ main(int argc, char *argv[])
 			err(1, "failed to daemonize");
 	}
 
-	for (ga = TAILQ_FIRST(&env->graphite_addrs); ga; ) {
-		switch (ga->sa.ss_family) {
-		case AF_INET:
-			((struct sockaddr_in *)&ga->sa)->sin_port =
-			    htons(ga->port);
-			break;
-		case AF_INET6:
-			((struct sockaddr_in6 *)&ga->sa)->sin6_port =
-			    htons(ga->port);
-			break;
-		default:
-			fatalx("");
-		}
+	SSL_load_error_strings();
+	SSL_library_init();
 
-		log_info("connecting to %s:%d",
-		    log_sockaddr((struct sockaddr *)&ga->sa), ga->port);
+	ctx = SSL_CTX_new(SSLv23_client_method());
 
-		if ((fd = socket(ga->sa.ss_family, SOCK_STREAM, 0)) == -1)
-			fatal("socket");
+	SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv2);
+	SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
 
-		if (connect(fd, (struct sockaddr *)&ga->sa,
-		    SA_LEN((struct sockaddr *)&ga->sa)) == -1) {
-			log_warn("connect to %s failed, skipping",
-			    log_sockaddr((struct sockaddr *)&ga->sa));
-			close(fd);
-			ga = TAILQ_NEXT(ga, entry);
-			continue;
-		}
+	env->base = event_base_new();
+	if (!env->base)
+		fatalx("event_base_new");
 
-		break;
-	}
-	if (ga == NULL)
-		fatalx("could not connect to graphite host");
+	graphite_init(env->base);
+	if ((env->graphite_conn = graphite_connection_new(env->graphite_host,
+	    env->graphite_port, env->graphite_reconnect)) == NULL)
+		fatalx("graphite_connection_new");
+	graphite_connection_setcb(env->graphite_conn, graphite_connect_cb,
+	    graphite_disconnect_cb, (void *)env);
+	if ((env->stats_conn = graphite_connection_new(env->stats_host,
+	    env->stats_port, env->stats_reconnect)) == NULL)
+		fatalx("graphite_connection_new");
+	graphite_connection_setcb(env->stats_conn, stats_connect_cb,
+	    stats_disconnect_cb, (void *)env);
+	env->stats_ev = event_new(env->base, -1, EV_PERSIST, stats_timer_cb,
+	    (void *)env);
+
+	stomp_init(env->base, NULL);
+	if ((env->stomp_conn = stomp_connection_new(env->stomp_host,
+	    env->stomp_port, env->stomp_version, env->stomp_vhost,
+	    (env->stomp_flags & STOMP_FLAG_SSL) ? ctx : NULL,
+	    env->stomp_reconnect, env->stomp_heartbeat,
+	    env->stomp_heartbeat)) == NULL)
+		fatalx("stomp_connection_new");
+	stomp_connection_setcb(env->stomp_conn, stomp_connect_cb, NULL, NULL,
+	    stomp_disconnect_cb, (void *)env);
+
+	for (sub = TAILQ_FIRST(&env->stomp_subs); sub; sub = TAILQ_NEXT(sub,
+	    entry))
+		sub->ack_ev = evtimer_new(env->base, stomp_ack_cb, (void *)sub);
 
 	log_info("startup");
 
@@ -165,116 +517,13 @@ main(int argc, char *argv[])
 		fatal("cannot drop privileges");
 #endif
 
-	if (amqp_open(env->amqp) != 0)
-		fatalx("amqp_open");
-	if (amqp_exchange(env->amqp) != 0)
-		fatalx("amqp_exchange");
-	if (amqp_queue(env->amqp) != 0)
-		fatalx("amqp_queue");
+	graphite_connect(env->graphite_conn);
+	graphite_connect(env->stats_conn);
+	stomp_connect(env->stomp_conn);
 
-	/* At this point, we are ready to consume messages in some sort of loop
-	 */
-	while (1) {
-		if ((tag = amqp_consume(env->amqp, &key, &buf, &len)) < 0)
-			fatalx("amqp_consume");
+	event_base_dispatch(env->base);
 
-		/* Count how many lines (metrics) are in this message */
-		lines = 1;
-		ptr = buf;
-		while (*ptr != '\0') {
-			len = strcspn(ptr, "\r\n");
-			ptr += len;
-			if (*ptr != '\0') {
-				lines++;
-				while (*ptr == '\r') ptr++;
-				while (*ptr == '\n') ptr++;
-			}
-		}
-		log_debug("%d line%s in message", lines,
-		    (lines == 1) ? "" : "s");
-
-		/* Allocate array of pointers to reference each line */
-		if ((line = calloc(lines, sizeof(char *))) == NULL)
-			fatal("calloc");
-
-		/* Go through message again, this time store a pointer to
-		 * each line and replace all linebreak characters with nulls
-		 */
-		i = 0;
-		line[i] = ptr = buf;
-		while (*ptr != '\0') {
-			len = strcspn(ptr, "\r\n");
-			ptr += len;
-			if (*ptr != '\0') {
-				while (*ptr == '\r') *(ptr++) = '\0';
-				while (*ptr == '\n') *(ptr++) = '\0';
-				line[++i] = ptr;
-			}
-		}
-
-		/* Allocate array of iovec structures */
-		if ((data = calloc(
-		    (env->amqp->flags & AMQP_FLAG_METRIC_IN_MESSAGE) ? lines * 2 : lines * 4,
-		    sizeof(struct iovec))) == NULL)
-			fatal("calloc");
-
-		/* Parse each line, one failure rejects the message. Build up
-		 * list of iovec structures as we go
-		 */
-		for (i = 0, j = 0; i < lines; i++) {
-
-			/* Ignore completely empty lines */
-			if (strlen(line[i]) == 0)
-				continue;
-
-			if (env->amqp->flags & AMQP_FLAG_METRIC_IN_MESSAGE) {
-				if (graphite_parse(NULL, line[i]) < 0)
-					break;
-			} else {
-				if (graphite_parse(key, line[i]) < 0)
-					break;
-
-				data[j].iov_base = key;
-				data[j].iov_len = strlen(key);
-				j++;
-
-				data[j].iov_base = SPACE;
-				data[j].iov_len = strlen(SPACE);
-				j++;
-			}
-
-			data[j].iov_base = line[i];
-			data[j].iov_len = strlen(line[i]);
-			j++;
-
-			data[j].iov_base = NEWLINE;
-			data[j].iov_len = strlen(NEWLINE);
-			j++;
-		}
-		if (i < lines) {
-			amqp_reject(env->amqp, tag, 0);
-			log_debug("message rejected");
-		} else {
-			/* Go go gadget writev */
-			if ((bytes = writev(fd, data, j)) == -1) {
-				log_warn("writev");
-				amqp_reject(env->amqp, tag, 1);
-				/* FIXME retry/reconnect logic here */
-			} else {
-				amqp_acknowledge(env->amqp, tag);
-				log_debug("message accepted, %d bytes written to graphite",
-				    bytes);
-			}
-		}
-
-		/* Free all of the things */
-		free(data);
-		free(line);
-		free(key);
-		free(buf);
-	}
-
-	amqp_close(env->amqp);
+	SSL_CTX_free(ctx);
 
 	return (0);
 }

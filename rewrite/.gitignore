@@ -1,0 +1,4 @@
+parse.c
+parse.h
+graphite-rewrite
+*.gz
