@@ -77,6 +77,8 @@ graphite_connect_cb(struct graphite_connection *c, void *arg)
 {
 	struct dequeue	*env = (struct dequeue *)arg;
 
+	log_debug("Connected to %s:%hu", env->graphite_host,
+	    env->graphite_port);
 	env->state |= DEQUEUE_GRAPHITE_CONNECTED;
 	check_state(env);
 }
@@ -404,6 +406,7 @@ main(int argc, char *argv[])
 	//u_int			  flags = 0;
 	//struct passwd		 *pw;
 
+	struct event_config	 *cfg;
 	struct dequeue		 *env;
 	SSL_CTX			 *ctx;
 	struct stomp_sub	 *sub;
@@ -466,11 +469,21 @@ main(int argc, char *argv[])
 	SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv2);
 	SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
 
-	env->base = event_base_new();
-	if (!env->base)
-		fatalx("event_base_new");
+	if ((cfg = event_config_new()) == NULL)
+		fatalx("event_config_new");
 
-	graphite_init(env->base);
+#ifdef __APPLE__
+	/* Don't use kqueue(2) on OS X */
+	event_config_avoid_method(cfg, "kqueue");
+#endif
+
+	env->base = event_base_new_with_config(cfg);
+	if (!env->base)
+		fatalx("event_base_new_with_config");
+	event_config_free(cfg);
+
+	if (graphite_init(env->base) < 0)
+		fatalx("graphite_init");
 	if ((env->graphite_conn = graphite_connection_new(env->graphite_host,
 	    env->graphite_port, env->graphite_reconnect)) == NULL)
 		fatalx("graphite_connection_new");
@@ -484,7 +497,8 @@ main(int argc, char *argv[])
 	env->stats_ev = event_new(env->base, -1, EV_PERSIST, stats_timer_cb,
 	    (void *)env);
 
-	stomp_init(env->base, NULL);
+	if (stomp_init(env->base) < 0)
+		fatalx("stomp_init");
 	if ((env->stomp_conn = stomp_connection_new(env->stomp_host,
 	    env->stomp_port, env->stomp_version, env->stomp_vhost,
 	    (env->stomp_flags & STOMP_FLAG_SSL) ? ctx : NULL,
