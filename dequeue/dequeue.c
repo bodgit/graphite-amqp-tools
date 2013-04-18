@@ -20,6 +20,9 @@
 #include <err.h>
 #include <pwd.h>
 
+#include <event2/bufferevent.h>
+#include <event2/buffer.h>
+
 #include "dequeue.h"
 
 __dead void	 usage(void);
@@ -27,6 +30,8 @@ void		 check_state(struct dequeue *);
 void		 graphite_connect_cb(struct graphite_connection *, void *);
 void		 graphite_disconnect_cb(struct graphite_connection *, void *);
 void		 stats_connect_cb(struct graphite_connection *, void *);
+void		 stats_send_metric(struct graphite_connection *, char *,
+		    char *, struct timeval, char *, ...);
 void		 stats_timer_cb(int, short, void *);
 void		 stats_disconnect_cb(struct graphite_connection *, void *);
 void		 stomp_connect_cb(struct stomp_connection *,
@@ -104,98 +109,76 @@ stats_connect_cb(struct graphite_connection *c, void *arg)
 }
 
 void
+stats_send_metric(struct graphite_connection *c, char *prefix, char *metric,
+    struct timeval tv, char *format, ...)
+{
+	char	 buffer[1024];
+	char	*m, *v, *t;
+	size_t	 size, length;
+	va_list	 ap;
+
+	length = 1024;
+	va_start(ap, format);
+
+	m = buffer;
+	if ((size = snprintf(m, length, "%s.%s", prefix, metric)) >= length)
+		goto bad;
+	length -= size + 1;
+
+	v = m + size + 1;
+	if ((size = vsnprintf(v, length, format, ap)) >= length)
+		goto bad;
+	length -= size + 1;
+
+	t = v + size + 1;
+	if ((size = snprintf(t, length, "%ld", tv.tv_sec)) >= length)
+		goto bad;
+
+	va_end(ap);
+	graphite_send(c, m, v, t);
+	return;
+bad:
+	va_end(ap);
+	log_warnx("Insufficient space to render metric");
+}
+
+void
 stats_timer_cb(int fd, short event, void *arg)
 {
 	struct dequeue	*env = (struct dequeue *)arg;
 	struct timeval	 tv;
-	size_t		 size;
-	char		*metric, *value, *timestamp;
 
 	gettimeofday(&tv, NULL);
 
-	size = snprintf(NULL, 0, "%ld", tv.tv_sec);
-	timestamp = calloc(size + 1, sizeof(char));
-	sprintf(timestamp, "%ld", tv.tv_sec);
-
-	size = snprintf(NULL, 0, "%s.stomp.bytes.rx", env->stats_prefix);
-	metric = calloc(size + 1, sizeof(char));
-	sprintf(metric, "%s.stomp.bytes.rx", env->stats_prefix);
-
-	size = snprintf(NULL, 0, "%lld", env->stomp_conn->bytes_rx);
-	value = calloc(size + 1, sizeof(char));
-	sprintf(value, "%lld", env->stomp_conn->bytes_rx);
-
-	graphite_send(env->stats_conn, metric, value, timestamp);
-
-	free(metric);
-	free(value);
-
-	size = snprintf(NULL, 0, "%s.stomp.bytes.tx", env->stats_prefix);
-	metric = calloc(size + 1, sizeof(char));
-	sprintf(metric, "%s.stomp.bytes.tx", env->stats_prefix);
-
-	size = snprintf(NULL, 0, "%lld", env->stomp_conn->bytes_tx);
-	value = calloc(size + 1, sizeof(char));
-	sprintf(value, "%lld", env->stomp_conn->bytes_tx);
-
-	graphite_send(env->stats_conn, metric, value, timestamp);
-
-	free(metric);
-	free(value);
-
-	size = snprintf(NULL, 0, "%s.stomp.frames.rx", env->stats_prefix);
-	metric = calloc(size + 1, sizeof(char));
-	sprintf(metric, "%s.stomp.frames.rx", env->stats_prefix);
-
-	size = snprintf(NULL, 0, "%lld", env->stomp_conn->frames_rx);
-	value = calloc(size + 1, sizeof(char));
-	sprintf(value, "%lld", env->stomp_conn->frames_rx);
-
-	graphite_send(env->stats_conn, metric, value, timestamp);
-
-	free(metric);
-	free(value);
-
-	size = snprintf(NULL, 0, "%s.stomp.frames.tx", env->stats_prefix);
-	metric = calloc(size + 1, sizeof(char));
-	sprintf(metric, "%s.stomp.frames.tx", env->stats_prefix);
-
-	size = snprintf(NULL, 0, "%lld", env->stomp_conn->frames_tx);
-	value = calloc(size + 1, sizeof(char));
-	sprintf(value, "%lld", env->stomp_conn->frames_tx);
-
-	graphite_send(env->stats_conn, metric, value, timestamp);
-
-	free(metric);
-	free(value);
-
-	size = snprintf(NULL, 0, "%s.graphite.bytes.tx", env->stats_prefix);
-	metric = calloc(size + 1, sizeof(char));
-	sprintf(metric, "%s.graphite.bytes.tx", env->stats_prefix);
-
-	size = snprintf(NULL, 0, "%lld", env->graphite_conn->bytes_tx);
-	value = calloc(size + 1, sizeof(char));
-	sprintf(value, "%lld", env->graphite_conn->bytes_tx);
-
-	graphite_send(env->stats_conn, metric, value, timestamp);
-
-	free(metric);
-	free(value);
-
-	size = snprintf(NULL, 0, "%s.graphite.metrics.tx", env->stats_prefix);
-	metric = calloc(size + 1, sizeof(char));
-	sprintf(metric, "%s.graphite.metrics.tx", env->stats_prefix);
-
-	size = snprintf(NULL, 0, "%lld", env->graphite_conn->metrics_tx);
-	value = calloc(size + 1, sizeof(char));
-	sprintf(value, "%lld", env->graphite_conn->metrics_tx);
-
-	graphite_send(env->stats_conn, metric, value, timestamp);
-
-	free(metric);
-	free(value);
-
-	free(timestamp);
+	/* FIXME shouldn't really be poking inside structs */
+	stats_send_metric(env->stats_conn, env->stats_prefix,
+	    "stomp.bytes.rx", tv, "%lld", env->stomp_conn->bytes_rx);
+	stats_send_metric(env->stats_conn, env->stats_prefix,
+	    "stomp.bytes.tx", tv, "%lld", env->stomp_conn->bytes_tx);
+	stats_send_metric(env->stats_conn, env->stats_prefix,
+	    "stomp.messages.rx", tv, "%lld", env->stomp_conn->messages_rx);
+	stats_send_metric(env->stats_conn, env->stats_prefix,
+	    "stomp.messages.tx", tv, "%lld", env->stomp_conn->messages_tx);
+	stats_send_metric(env->stats_conn, env->stats_prefix,
+	    "stomp.frames.rx", tv, "%lld", env->stomp_conn->frames_rx);
+	stats_send_metric(env->stats_conn, env->stats_prefix,
+	    "stomp.frames.tx", tv, "%lld", env->stomp_conn->frames_tx);
+	stats_send_metric(env->stats_conn, env->stats_prefix,
+	    "stomp.buffer.input", tv, "%zd",
+	    evbuffer_get_length(bufferevent_get_input(env->stomp_conn->bev)));
+	stats_send_metric(env->stats_conn, env->stats_prefix,
+	    "stomp.buffer.output", tv, "%zd",
+	    evbuffer_get_length(bufferevent_get_output(env->stomp_conn->bev)));
+	stats_send_metric(env->stats_conn, env->stats_prefix,
+	    "graphite.bytes.tx", tv, "%lld", env->graphite_conn->bytes_tx);
+	stats_send_metric(env->stats_conn, env->stats_prefix,
+	    "graphite.metrics.tx", tv, "%lld", env->graphite_conn->metrics_tx);
+	stats_send_metric(env->stats_conn, env->stats_prefix,
+	    "graphite.buffer.input", tv, "%zd",
+	    evbuffer_get_length(bufferevent_get_input(env->graphite_conn->bev)));
+	stats_send_metric(env->stats_conn, env->stats_prefix,
+	    "graphite.buffer.output", tv, "%zd",
+	    evbuffer_get_length(bufferevent_get_output(env->graphite_conn->bev)));
 }
 
 void
