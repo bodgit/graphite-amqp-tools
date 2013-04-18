@@ -52,70 +52,23 @@ Use the
 option to override the default port.
 .Pp
 .It Xo
-.Ic amqp Ar address
+.Ic stomp Ar address
 .Op Ic port Ar number
 .Op Ic vhost Ar string
 .Op Ic user Ar string
 .Op Ic password Ar string
+.Op Ic version Ar string
+.Op Ic ssl
+.Op Ic heartbeat Ar milliseconds
+.Op Ic reconnect Ar seconds
 .Xc
-Specify the source AMQP server.
-Use the
-.Ic port , Ic vhost , Ic user
-and
-.Ic password
-options to override the AMQP defaults.
+Specify the source STOMP server.
 .Pp
 .It Xo
-.Ic exchange Ar string
-.Op Ic type Pq Ic topic Ns | Ns Ic direct Ns | Ns Ic fanout
-.Op Ic federated Ar upstreams
+.Ic send Ar string
 .Xc
-Specify the
-.Ar exchange
-that will be created.
-The
-.Ic type
-option can be used to set the type of exchange created.
-If the
-.Ic federated
-option is used, the type of exchange created is actually
-.Sq Ar x-federation
-and the additional arguments
-.Sq Ar upstream-set
-and
-.Sq Ar type
-are passed set to the
-.Ar upstreams
-argument which refers to a set of upstream servers along with the original
-exchange type respectively.
-.Pp
-.It Xo
-.Ic metric-location
-.Pq Ic message Ns | Ns Ic key
-.Xc
-Specify the location of the Graphite metric key in the AMQP message.
-Use
-.Ic key Pq the default
-to put the metric key in the
-.Ar routing-key
-of the message which is possible when using
-.Ic topic
-exchanges.
-Use
-.Ic message
-to put the metric key in the body of the message.
-.Pp
-.It Xo
-.Ic routing-key Ar routing-key
-.Xc
-Specify the
-.Ar routing-key
-to use for messages if
-.Ar metric-location
-is set to
-.Ar message .
-It defaults to
-.Sq graphite .
+Specify the path(s) to send messages to, refer to your STOMP server
+documentation.
 .Pp
 .It Xo
 .Ic message-size Ar bytes
@@ -133,10 +86,27 @@ option to override the default timeout of 500 milliseconds for sending
 messages with less than
 .Ar bytes
 of payload.
-This option is ignored entirely if
-.Ar metric-location
-is set to
-.Ar key .
+.Pp
+.It Xo
+.Ic statistics Ar address
+.Op Ic port Ar number
+.Op Ic reconnect Ar seconds
+.Op Ic interval Ar seconds
+.Op Ic prefix Ar string
+.Xc
+.Xr graphite-enqueue 8
+can periodically emit statistics to another Graphite server, see the
+.Ar graphite
+option for details.
+Use the
+.Ic interval
+option to set how often this happens.
+The
+.Ic prefix
+by default is the hostname as returned by
+.Xr gethostname 3
+with any periods replaced with underscores and appended with
+.Sq .enqueue .
 .Pp
 .El
 .Sh FILES
@@ -150,13 +120,10 @@ The following example is the default options
 uses:
 .Bd -literal -offset indent
 listen on * port 2003
-amqp localhost port 5672 vhost "/" user "guest" password "guest"
-exchange "graphite" type topic
-metric-location key
+stomp localhost port 61613 vhost "/" reconnect 10
+send "/queue/graphite"
+statistics localhost port 2003 reconnect 10 interval 60 prefix $hostname.enqueue
 .Ed
-.Sh NOTES
-The advanced exchange options are only currently supported by RabbitMQ
-brokers.
 .Sh SEE ALSO
 .Xr graphite-enqueue 8 ,
 .Xr graphite-dequeue 8 ,

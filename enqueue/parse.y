@@ -23,6 +23,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/param.h>
 
 #include <ctype.h>
 #include <errno.h>
@@ -32,6 +33,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
+#include <unistd.h>
 
 #include "enqueue.h"
 
@@ -61,8 +63,11 @@ struct opts {
 	char		*vhost;
 	char		*user;
 	char		*password;
-	char		*type;
-	char		*upstreams;
+	long long	 heartbeat;
+	int		 version;
+	int		 reconnect;
+	char		*prefix;
+	int		 interval;
 	int		 flags;
 	long long	 timeout;
 } opts;
@@ -83,28 +88,33 @@ typedef struct {
 %}
 
 %token	LISTEN ON
-%token	AMQP VHOST USER PASSWORD
-%token	EXCHANGE TYPE FEDERATED
-%token	METRICLOCATION
+%token	STOMP VHOST USER PASSWORD VERSION SSL_OPTION
+%token	SEND
 %token	MESSAGESIZE
-%token	ROUTINGKEY
+%token	STATISTICS INTERVAL PREFIX
 %token	PORT
+%token	HEARTBEAT
+%token	RECONNECT
 %token	TIMEOUT
 %token	ERROR
 %token	<v.string>		STRING
 %token	<v.number>		NUMBER
 %type	<v.addr>		address
-%type	<v.opts>		amqp_opts amqp_opts_l amqp_opt
-%type	<v.opts>		exchange_opts exchange_opts_l exchange_opt
 %type	<v.opts>		listen_opts listen_opts_l listen_opt
+%type	<v.opts>		stomp_opts stomp_opts_l stomp_opt
 %type	<v.opts>		message_opts message_opts_l message_opt
+%type	<v.opts>		stats_opts stats_opts_l stats_opt
 %type	<v.opts>		port
 %type	<v.opts>		vhost
 %type	<v.opts>		user
 %type	<v.opts>		password
-%type	<v.opts>		type
-%type	<v.opts>		federated
+%type	<v.opts>		version
+%type	<v.opts>		heartbeat
+%type	<v.opts>		reconnect
 %type	<v.opts>		timeout
+%type	<v.opts>		interval
+%type	<v.opts>		prefix
+%type	<v.opts>		ssl
 %%
 
 grammar		: /* empty */
@@ -130,7 +140,6 @@ main		: LISTEN ON address listen_opts	{
 				la = calloc(1, sizeof(struct listen_addr));
 				if (la == NULL)
 					fatal("listen on calloc");
-				la->fd = -1;
 				la->port =
 				    (opts.port) ? opts.port : GRAPHITE_DEFAULT_PORT;
 				memcpy(&la->sa, &h->ss,
@@ -142,58 +151,45 @@ main		: LISTEN ON address listen_opts	{
 			free($3->name);
 			free($3);
 		}
-		| AMQP STRING amqp_opts	{
-			conf->amqp->host = $2;
-			conf->amqp->port = opts.port;
+		| STOMP STRING stomp_opts	{
+			conf->stomp_host = $2;
+			conf->stomp_port = opts.port;
+			conf->stomp_heartbeat = opts.heartbeat;
+			conf->stomp_reconnect.tv_sec = opts.reconnect;
+			conf->stomp_flags = opts.flags;
 
-			if (conf->amqp->vhost)
-				free(conf->amqp->vhost);
-			conf->amqp->vhost = (opts.vhost) ? opts.vhost : NULL;
+			if (conf->stomp_vhost)
+				free(conf->stomp_vhost);
+			conf->stomp_vhost = (opts.vhost) ? opts.vhost : NULL;
 
-			if (conf->amqp->user)
-				free(conf->amqp->user);
-			conf->amqp->user = (opts.user) ? opts.user : NULL;
+			if (conf->stomp_user)
+				free(conf->stomp_user);
+			conf->stomp_user = (opts.user) ? opts.user : NULL;
 
-			if (conf->amqp->password)
-				free(conf->amqp->password);
-			conf->amqp->password = (opts.password) ? opts.password : NULL;
+			if (conf->stomp_password)
+				free(conf->stomp_password);
+			conf->stomp_password = (opts.password) ? opts.password : NULL;
 		}
-		| EXCHANGE STRING exchange_opts	{
-			if (conf->amqp->exchange)
-				free(conf->amqp->exchange);
-			conf->amqp->exchange = $2;
-
-			if (conf->amqp->type)
-				free(conf->amqp->type);
-			conf->amqp->type = (opts.type) ? opts.type : NULL;
-
-			if (conf->amqp->upstreams)
-				free(conf->amqp->upstreams);
-			conf->amqp->upstreams = (opts.upstreams) ? opts.upstreams : NULL;
+		| SEND STRING	{
+			if (conf->stomp_send)
+				free(conf->stomp_send);
+			conf->stomp_send = $2;
 		}
 		| MESSAGESIZE NUMBER message_opts	{
-			conf->amqp->bytes = $2;
+			conf->stomp_bytes = $2;
 
-			conf->amqp->timeout = (opts.timeout) ? opts.timeout : AMQP_DEFAULT_TIMEOUT;
+			conf->stomp_timeout = (opts.timeout) ? opts.timeout : STOMP_DEFAULT_TIMEOUT;
 		}
-		| METRICLOCATION STRING		{
-			if (!strcmp($2, "message"))
-				conf->amqp->flags |=
-				    AMQP_FLAG_METRIC_IN_MESSAGE;
-			else if (!strcmp($2, "key"))
-				conf->amqp->flags &=
-				    ~AMQP_FLAG_METRIC_IN_MESSAGE;
-			else {
-				yyerror("unknown metric location");
-				free($2);
-				YYERROR;
-			}
-			free($2);
-		}
-		| ROUTINGKEY STRING		{
-			if (conf->amqp->key)
-				free(conf->amqp->exchange);
-			conf->amqp->key = $2;
+		| STATISTICS STRING stats_opts	{
+			if (conf->stats_host)
+				free(conf->stats_host);
+			conf->stats_host = $2;
+			conf->stats_port = opts.port;
+			conf->stats_reconnect.tv_sec = opts.reconnect;
+			conf->stats_interval.tv_sec = opts.interval;
+			if (conf->stats_prefix)
+				free(conf->stats_prefix);
+			conf->stats_prefix = opts.prefix;
 		}
 		;
 
@@ -212,32 +208,6 @@ address		: STRING		{
 		}
 		;
 
-amqp_opts	:	{ opts_default(); }
-		  amqp_opts_l
-			{ $$ = opts; }
-		|	{ opts_default(); $$ = opts; }
-		;
-amqp_opts_l	: amqp_opts_l amqp_opt
-		| amqp_opt
-		;
-amqp_opt	: port
-		| vhost
-		| user
-		| password
-		;
-
-exchange_opts	:	{ opts_default(); }
-		  exchange_opts_l
-			{ $$ = opts; }
-		|	{ opts_default(); $$ = opts; }
-		;
-exchange_opts_l	: exchange_opts_l exchange_opt
-		| exchange_opt
-		;
-exchange_opt	: type
-		| federated
-		;
-
 listen_opts	:	{ opts_default(); }
 		  listen_opts_l
 			{ $$ = opts; }
@@ -249,6 +219,24 @@ listen_opts_l	: listen_opts_l listen_opt
 listen_opt	: port
 		;
 
+stomp_opts	:	{ opts_default(); }
+		  stomp_opts_l
+			{ $$ = opts; }
+		|	{ opts_default(); $$ = opts; }
+		;
+stomp_opts_l	: stomp_opts_l stomp_opt
+		| stomp_opt
+		;
+stomp_opt	: port
+		| vhost
+		| user
+		| password
+		| version
+		| ssl
+		| heartbeat
+		| reconnect
+		;
+
 message_opts	:	{ opts_default(); }
 		  message_opts_l
 			{ $$ = opts; }
@@ -258,6 +246,20 @@ message_opts_l	: message_opts_l message_opt
 		| message_opt
 		;
 message_opt	: timeout
+		;
+
+stats_opts	:	{ opts_default(); }
+		  stats_opts_l
+			{ $$ = opts; }
+		|	{ opts_default(); $$ = opts; }
+		;
+stats_opts_l	: stats_opts_l stats_opt
+		| stats_opt
+		;
+stats_opt	: port
+		| reconnect
+		| interval
+		| prefix
 		;
 
 port		: PORT NUMBER {
@@ -284,20 +286,55 @@ password	: PASSWORD STRING {
 		}
 		;
 
-type		: TYPE STRING {
-			if (strcmp($2, AMQP_EXCHANGE_TYPE_TOPIC) &&
-			    strcmp($2, AMQP_EXCHANGE_TYPE_DIRECT) &&
-			    strcmp($2, AMQP_EXCHANGE_TYPE_FANOUT)) {
-				yyerror("invalid exchange type");
+version		: VERSION STRING {
+			if (!strcmp($2, STOMP_VERSION_1_0_S))
+				opts.version = STOMP_VERSION_1_0;
+			else if (!strcmp($2, STOMP_VERSION_1_1_S))
+				opts.version = STOMP_VERSION_1_1;
+			else if (!strcmp($2, STOMP_VERSION_1_2_S))
+				opts.version = STOMP_VERSION_1_2;
+			else {
+				yyerror("invalid stomp version");
 				free($2);
 				YYERROR;
 			}
-			opts.type = $2;
 		}
 		;
 
-federated	: FEDERATED STRING {
-			opts.upstreams = $2;
+ssl		: SSL_OPTION {
+			opts.flags |= STOMP_FLAG_SSL;
+		}
+		;
+
+reconnect	: RECONNECT NUMBER {
+			if ($2 < 0 || $2 > UINT_MAX) {
+				yyerror("invalid reconnect");
+				YYERROR;
+			}
+			opts.reconnect = $2;
+		}
+		;
+
+interval	: INTERVAL NUMBER {
+			if ($2 < 0 || $2 > UINT_MAX) {
+				yyerror("invalid interval");
+				YYERROR;
+			}
+			opts.interval = $2;
+		}
+		;
+
+heartbeat	: HEARTBEAT NUMBER {
+			if ($2 < 1 || $2 > LLONG_MAX) {
+				yyerror("invalid heartbeat");
+				YYERROR;
+			}
+			opts.heartbeat = $2;
+		}
+		;
+
+prefix		: PREFIX STRING {
+			opts.prefix = $2;
 		}
 		;
 
@@ -350,19 +387,21 @@ lookup(char *s)
 {
 	/* this has to be sorted always */
 	static const struct keywords keywords[] = {
-		{ "amqp",		AMQP},
-		{ "exchange",		EXCHANGE},
-		{ "federated",		FEDERATED},
+		{ "heartbeat",		HEARTBEAT},
 		{ "listen",		LISTEN},
 		{ "message-size",	MESSAGESIZE},
-		{ "metric-location",	METRICLOCATION},
 		{ "on",			ON},
 		{ "password",		PASSWORD},
 		{ "port",		PORT},
-		{ "routing-key",	ROUTINGKEY},
+		{ "prefix",		PREFIX},
+		{ "reconnect",		RECONNECT},
+		{ "send",		SEND},
+		{ "ssl",		SSL_OPTION},
+		{ "statistics",		STATISTICS},
+		{ "stomp",		STOMP},
 		{ "timeout",		TIMEOUT},
-		{ "type",		TYPE},
 		{ "user",		USER},
+		{ "version",		VERSION},
 		{ "vhost",		VHOST}
 	};
 	const struct keywords	*p;
@@ -633,14 +672,12 @@ popfile(void)
 struct enqueue *
 parse_config(const char *filename, int flags)
 {
-	int		 errors = 0;
+	int	 errors = 0;
+	char	 hostname[MAXHOSTNAMELEN];
+	char	*ptr;
+	size_t	 size;
 
 	if ((conf = calloc(1, sizeof(*conf))) == NULL) {
-		log_warn("cannot allocate memory");
-		return (NULL);
-	}
-
-	if ((conf->amqp = amqp_init()) == NULL) {
 		log_warn("cannot allocate memory");
 		return (NULL);
 	}
@@ -664,42 +701,43 @@ parse_config(const char *filename, int flags)
 
 	/* Fill in the gaps with well-defined defaults
 	 */
+	TAILQ_INIT(&conf->clients);
 
-	/* AMQP host/login */
-	if (conf->amqp->host == NULL)
-		if ((conf->amqp->host = strdup(AMQP_DEFAULT_HOST)) == NULL)
+	/* STOMP */
+	if (conf->stomp_host == NULL)
+		if ((conf->stomp_host = strdup(STOMP_DEFAULT_HOST)) == NULL)
 			fatal("strdup");
-	if (conf->amqp->port == 0)
-		conf->amqp->port = AMQP_DEFAULT_PORT;
-	if (conf->amqp->vhost == NULL)
-		if ((conf->amqp->vhost = strdup(AMQP_DEFAULT_VHOST)) == NULL)
-			fatal("strdup");
-	if (conf->amqp->user == NULL)
-		if ((conf->amqp->user = strdup(AMQP_DEFAULT_USER)) == NULL)
-			fatal("strdup");
-	if (conf->amqp->password == NULL)
-		if ((conf->amqp->password = strdup(AMQP_DEFAULT_PASSWORD)) == NULL)
-			fatal("strdup");
-
-	/* AMQP exchange */
-	if (conf->amqp->exchange == NULL)
-		if ((conf->amqp->exchange = strdup(AMQP_DEFAULT_EXCHANGE)) == NULL)
-			fatal("strdup");
-	if (conf->amqp->type == NULL)
-		if ((conf->amqp->type = strdup(AMQP_DEFAULT_EXCHANGE_TYPE)) == NULL)
-			fatal("strdup");
+	if (conf->stomp_port == 0) {
+		if (conf->stomp_flags & STOMP_FLAG_SSL)
+			conf->stomp_port = STOMP_DEFAULT_SSL_PORT;
+		else
+			conf->stomp_port = STOMP_DEFAULT_PORT;
+	}
+	if (conf->stomp_version == 0)
+		conf->stomp_version = STOMP_VERSION_ANY;
 
 	/* AMQP message sending timeout */
-	if (conf->amqp->timeout == 0)
-		conf->amqp->timeout = AMQP_DEFAULT_TIMEOUT;
+	if (conf->stomp_timeout == 0)
+		conf->stomp_timeout = STOMP_DEFAULT_TIMEOUT;
 
-	/* Only topic exchanges can handle the metric key as the routing key */
-	if (strcmp(conf->amqp->type, AMQP_EXCHANGE_TYPE_TOPIC) &&
-	    !(conf->amqp->flags & AMQP_FLAG_METRIC_IN_MESSAGE))
-		fatalx("metric key must be in message with non-topic exchange");
-	if (conf->amqp->key == NULL)
-		if ((conf->amqp->key = strdup(AMQP_DEFAULT_BINDING_DIRECT)) == NULL)
+	/* Statistics */
+	if (conf->stats_host == NULL)
+		if ((conf->stats_host = strdup(GRAPHITE_DEFAULT_HOST)) == NULL)
 			fatal("strdup");
+	if (conf->stats_port == 0)
+		conf->stats_port = GRAPHITE_DEFAULT_PORT;
+	if (conf->stats_reconnect.tv_sec == 0)
+		conf->stats_reconnect.tv_sec = 10;
+	if (conf->stats_interval.tv_sec == 0)
+		conf->stats_interval.tv_sec = 60;
+	if (conf->stats_prefix == NULL) {
+		gethostname(hostname, MAXHOSTNAMELEN);
+		while ((ptr = strchr(hostname, '.')) != NULL)
+			*ptr = '_';
+		size = snprintf(NULL, 0, "%s.enqueue", hostname);
+		conf->stats_prefix = calloc(size + 1, sizeof(char));
+		sprintf(conf->stats_prefix, "%s.enqueue", hostname);
+	}
 
 	return (conf);
 }

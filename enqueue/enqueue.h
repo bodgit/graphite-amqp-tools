@@ -24,18 +24,22 @@
 #include <event2/event.h>
 #include <event2/buffer.h>
 #include <event2/bufferevent.h>
+#include <event2/listener.h>
 
 #include "common.h"
+#include "stomp.h"
+#include "graphite.h"
 
 #define	ENQUEUE_CONF_FILE	"/etc/graphite-enqueue.conf"
 #define	ENQUEUE_USER		"_enqueue"
 
+#define	STOMP_DEFAULT_TIMEOUT	500
+
 struct listen_addr {
 	TAILQ_ENTRY(listen_addr)	 entry;
 	struct sockaddr_storage		 sa;
-	int				 fd;
-	struct event			*ev;
 	int				 port;
+	struct evconnlistener		*listener;
 };
 
 struct enqueue_addr {
@@ -53,11 +57,52 @@ struct enqueue {
 
 	TAILQ_HEAD(listen_addrs, listen_addr)	 listen_addrs;
 
-	struct amqp				*amqp;
+	char					*stomp_host;
+	unsigned short				 stomp_port;
+	char					*stomp_vhost;
+	char					*stomp_user;
+	char					*stomp_password;
+	int					 stomp_version;
+	long long				 stomp_heartbeat;
+	struct timeval				 stomp_reconnect;
+	int					 stomp_flags;
+
+	char					*stomp_send;
+
+	struct stomp_connection			*stomp_conn;
+
+	unsigned long long			 stomp_bytes;
+	long long				 stomp_timeout;
 
 	char					*buffer;
 	struct event				*ev;
 	struct timeval				 t;
+
+	char					*stats_host;
+	unsigned short				 stats_port;
+	struct timeval				 stats_reconnect;
+	struct timeval				 stats_interval;
+	char					*stats_prefix;
+
+	struct graphite_connection		*stats_conn;
+	struct event				*stats_ev;
+
+	TAILQ_HEAD(clients, client)		 clients;
+
+	/* Stats */
+	unsigned long long			 bytes_rx;
+	unsigned long long			 metrics_rx;
+	unsigned long long			 connects;
+	unsigned long long			 disconnects;
+};
+
+struct client {
+	TAILQ_ENTRY(client)	 entry;
+	struct bufferevent	*bev;
+	struct enqueue		*env;
+
+	unsigned long long	 bytes_rx;
+	unsigned long long	 metrics_rx;
 };
 
 /* prototypes */
