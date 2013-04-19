@@ -246,6 +246,7 @@ main(int argc, char *argv[])
 			fprintf(stderr, "Study failed: %s\n", pcre_err);
 			nrule = TAILQ_NEXT(rule, entry);
 			TAILQ_REMOVE(&rewrite_rules, rule, entry);
+			pcre_free(rule->re);
 			free(rule->pattern);
 			free(rule->replacement);
 			free(rule);
