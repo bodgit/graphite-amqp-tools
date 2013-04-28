@@ -17,14 +17,68 @@
 #ifndef _REWRITE_H
 #define _REWRITE_H
 
+#include <pcre.h>
+
 #include "common.h"
 #include "stomp.h"
+#include "graphite.h"
 
 #define	REWRITE_CONF_FILE		"/etc/graphite-rewrite.conf"
 #define	REWRITE_USER			"_rewrite"
 
-struct rewrite {
-	struct event_base	*base;
+struct stomp_sub {
+	struct rewrite			*env;
+	char				*path;
+	int				 ack;
+	struct event			*ack_ev;
+	struct timeval			 ack_tv;
+	char				*ack_pending;
+	struct stomp_subscription	*subscription;
+	
+	TAILQ_ENTRY(stomp_sub)		 entry;
 };
+
+struct rewrite_rule {
+	TAILQ_ENTRY(rewrite_rule)	 entry;
+	char				*pattern;
+	char				*replacement;
+	pcre				*re;
+	pcre_extra			*sd;
+};
+
+struct rewrite {
+	struct event_base			*base;
+
+	char					*stomp_host;
+	unsigned short				 stomp_port;
+	char					*stomp_vhost;
+	char					*stomp_user;
+	char					*stomp_password;
+	int					 stomp_version;
+	long long				 stomp_heartbeat;
+	struct timeval				 stomp_reconnect;
+	int					 stomp_flags;
+
+	TAILQ_HEAD(stomp_subs, stomp_sub)	 stomp_subs;
+
+	TAILQ_HEAD(rewrite_rules, rewrite_rule)	 rewrite_rules;
+
+	char					*stomp_send;
+
+	struct stomp_connection			*stomp_conn;
+
+	char					*stats_host;
+	unsigned short				 stats_port;
+	struct timeval				 stats_reconnect;
+	struct timeval				 stats_interval;
+	char					*stats_prefix;
+
+	struct graphite_connection		*stats_conn;
+	struct event				*stats_ev;
+};
+
+/* prototypes */
+/* parse.y */
+struct rewrite	*parse_config(const char *, int);
 
 #endif /* _REWRITE_H */

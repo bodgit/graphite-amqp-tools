@@ -8,11 +8,11 @@ foreach(man ${ENQUEUE_MANS})
 		COMMENT "Building ${man}.gz")
 endforeach()
 
-#bison_target(PARSER ${CMAKE_CURRENT_SOURCE_DIR}/parse.y ${CMAKE_CURRENT_BINARY_DIR}/parse.c)
+bison_target(PARSER ${CMAKE_CURRENT_SOURCE_DIR}/parse.y ${CMAKE_CURRENT_BINARY_DIR}/parse.c)
 
 add_executable(graphite-rewrite
 	rewrite.c
-	#${BISON_PARSER_OUTPUTS}
+	${BISON_PARSER_OUTPUTS}
 	$<TARGET_OBJECTS:common>
 	$<TARGET_OBJECTS:stomp>
 	$<TARGET_OBJECTS:graphite>
