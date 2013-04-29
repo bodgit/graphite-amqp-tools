@@ -235,10 +235,23 @@ void
 stomp_connect_cb(struct stomp_connection *c, struct stomp_frame *frame,
     void *arg)
 {
-//	struct rewrite	*env = (struct rewrite *)arg;
+	struct rewrite		*env = (struct rewrite *)arg;
+	struct stomp_sub	*sub;
 
 //	env->state |= DEQUEUE_STOMP_CONNECTED;
 //	check_state(env);
+
+	for (sub = TAILQ_FIRST(&env->stomp_subs); sub;
+	    sub = TAILQ_NEXT(sub, entry)) {
+		sub->subscription = stomp_subscription_new(env->stomp_conn,
+		    sub->path, sub->ack);
+		stomp_subscription_setcb(sub->subscription, stomp_message_cb,
+		    (void *)sub);
+		stomp_subscribe(env->stomp_conn, sub->subscription);
+	}
+		//stomp_unsubscribe(env->stomp_conn, sub->subscription);
+		//stomp_subscription_free(sub->subscription);
+		//sub->subscription = NULL;
 }
 
 void
@@ -253,6 +266,11 @@ stomp_message_cb(struct stomp_connection *c,
 	char			**line;
 	size_t			  len;
 	char			**part;
+	struct rewrite_rule	 *rule;
+	int			  rc;
+	int			  ovector[30];
+	int			  size;
+	char			 *new;
 
 	/* Count how many lines (metrics) are in this message */
 	lines = 1;
@@ -287,10 +305,11 @@ stomp_message_cb(struct stomp_connection *c,
 		}
 	}
 
-	/* Allocate array of pointers 3 x # of lines to store the
-	 * metric, value and timestamp on each line
+	/* Allocate array of pointers 4 x # of lines to store the
+	 * metric, value and timestamp on each line along with the
+	 * potentially rewritten metric
 	 */
-	if ((part = calloc(lines * 3, sizeof(unsigned char *))) == NULL)
+	if ((part = calloc(lines * 4, sizeof(unsigned char *))) == NULL)
 		fatal("calloc");
 
 	for (i = j = 0; i < lines; i++) {
@@ -303,7 +322,7 @@ stomp_message_cb(struct stomp_connection *c,
 			log_warnx("Can't parse line \"%s\"", line[i]);
 			break;
 		}
-		j += 3;
+		j += 4;
 	}
 
 	/* If this is not auto ack, we will need the "ack" or "message-id"
@@ -356,20 +375,44 @@ stomp_message_cb(struct stomp_connection *c,
 			break;
 		}
 
-#if 0
-	/* Success, send on to Graphite and acknowledge */
+	/* Message looks ok, apply any rewrite rules to each line */
 	for (i = j = 0; i < lines; i++) {
 
 		/* Ignore completely empty lines */
 		if (strlen(line[i]) == 0)
 			continue;
 
-		graphite_send(sub->env->graphite_conn,
-		    part[j + GRAPHITE_PART_METRIC],
-		    part[j + GRAPHITE_PART_VALUE],
-		    part[j + GRAPHITE_PART_TIMESTAMP]);
-		j += 3;
+		part[j + 3] = strdup(part[j + GRAPHITE_PART_METRIC]);
+
+		for (rule = TAILQ_FIRST(&sub->env->rewrite_rules); rule;
+		    rule = TAILQ_NEXT(rule, entry)) {
+			if ((rc = pcre_exec(rule->re, rule->sd, part[j + 3],
+			    strlen(part[j + 3]), 0, 0, ovector, 30)) < -1) {
+				fprintf(stderr, "Match failed: %d\n", rc);
+				continue;
+			}
+			if (rc == 0) {
+				fprintf(stderr, "ovector too small\n");
+				continue;
+			}
+			if (rc > 0) {
+				fprintf(stderr, "String was \"%s\"\n", part[j + 3]);
+
+				size = pcre_replace(part[j + 3], rule->replacement,
+				    ovector, rc, NULL, 0);
+				new = calloc(size + 1, sizeof(char));
+				pcre_replace(part[j + 3], rule->replacement, ovector, rc,
+				    new, size + 1);
+
+				fprintf(stderr, "String is now \"%s\"\n", new);
+				free(part[j + 3]);
+				part[j + 3] = new;
+			}
+		}
+
+		j += 4;
 	}
+
 	switch (sub->ack) {
 	case STOMP_ACK_CLIENT:
 		if (sub->ack_pending)
@@ -385,7 +428,6 @@ stomp_message_cb(struct stomp_connection *c,
 	default:
 		break;
 	}
-#endif
 
 end:
 	free(part);
@@ -443,8 +485,6 @@ main(int argc, char *argv[])
 	//int			 ovector[30];
 	//int			 size;
 	//char			*new;
-
-	//char			*subject;
 
 	log_init(1);	/* log to stderr until daemonized */
 
@@ -517,6 +557,8 @@ main(int argc, char *argv[])
 		fatalx("event_base_new_with_config");
 	event_config_free(cfg);
 
+	if (graphite_init(env->base) < 0)
+		fatalx("graphite_init");
 	if ((env->stats_conn = graphite_connection_new(env->stats_host,
 	    env->stats_port, env->stats_reconnect)) == NULL)
 		fatalx("graphite_connection_new");
