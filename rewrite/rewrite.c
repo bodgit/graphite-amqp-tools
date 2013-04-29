@@ -202,9 +202,11 @@ stats_timer_cb(int fd, short event, void *arg)
 	    "stomp.frames.tx", tv, "%lld", env->stomp_conn->frames_tx);
 	stats_send_metric(env->stats_conn, env->stats_prefix,
 	    "stomp.buffer.input", tv, "%zd",
+	    (env->stomp_conn->bev == NULL) ? 0 :
 	    evbuffer_get_length(bufferevent_get_input(env->stomp_conn->bev)));
 	stats_send_metric(env->stats_conn, env->stats_prefix,
 	    "stomp.buffer.output", tv, "%zd",
+	    (env->stomp_conn->bev == NULL) ? 0 :
 	    evbuffer_get_length(bufferevent_get_output(env->stomp_conn->bev)));
 #if 0
 	stats_send_metric(env->stats_conn, env->stats_prefix,

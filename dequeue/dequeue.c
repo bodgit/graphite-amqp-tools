@@ -165,9 +165,11 @@ stats_timer_cb(int fd, short event, void *arg)
 	    "stomp.frames.tx", tv, "%lld", env->stomp_conn->frames_tx);
 	stats_send_metric(env->stats_conn, env->stats_prefix,
 	    "stomp.buffer.input", tv, "%zd",
+	    (env->stomp_conn->bev == NULL) ? 0 :
 	    evbuffer_get_length(bufferevent_get_input(env->stomp_conn->bev)));
 	stats_send_metric(env->stats_conn, env->stats_prefix,
 	    "stomp.buffer.output", tv, "%zd",
+	    (env->stomp_conn->bev == NULL) ? 0 :
 	    evbuffer_get_length(bufferevent_get_output(env->stomp_conn->bev)));
 	stats_send_metric(env->stats_conn, env->stats_prefix,
 	    "graphite.bytes.tx", tv, "%lld", env->graphite_conn->bytes_tx);
@@ -175,9 +177,11 @@ stats_timer_cb(int fd, short event, void *arg)
 	    "graphite.metrics.tx", tv, "%lld", env->graphite_conn->metrics_tx);
 	stats_send_metric(env->stats_conn, env->stats_prefix,
 	    "graphite.buffer.input", tv, "%zd",
+	    (env->graphite_conn->bev == NULL) ? 0 :
 	    evbuffer_get_length(bufferevent_get_input(env->graphite_conn->bev)));
 	stats_send_metric(env->stats_conn, env->stats_prefix,
 	    "graphite.buffer.output", tv, "%zd",
+	    (env->graphite_conn->bev == NULL) ? 0 :
 	    evbuffer_get_length(bufferevent_get_output(env->graphite_conn->bev)));
 }
 
@@ -374,7 +378,10 @@ stomp_disconnect_cb(struct stomp_connection *c, void *arg)
 
 	/* FIXME Need to clear down all of the subscription state */
 	for (sub = TAILQ_FIRST(&env->stomp_subs); sub;
-	    sub = TAILQ_NEXT(sub, entry));
+	    sub = TAILQ_NEXT(sub, entry)) {
+		if (evtimer_pending(sub->ack_ev, NULL))
+			evtimer_del(sub->ack_ev);
+	}
 
 	check_state(env);
 }
