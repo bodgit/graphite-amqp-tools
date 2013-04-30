@@ -1,6 +1,6 @@
 Name		: graphite-amqp-tools
 Version		: 0.1
-Release		: 1.20120623gitXXXXXXXX
+Release		: 1.20130430gitXXXXXXXX
 Summary		: Graphite AMQP Tools
 Group		: Applications/Internet
 
@@ -17,9 +17,9 @@ BuildRequires	: cmake28 >= 2.8.8
 %else
 BuildRequires	: cmake >= 2.8.8
 %endif
-BuildRequires	: librabbitmq-devel >= 0.2.0
 BuildRequires	: libevent-devel >= 2
 BuildRequires	: bison
+BuildRequires	: pcre-devel
 
 %description
 Graphite AMQP Tools is a set of tools for getting Graphite data in and
@@ -43,7 +43,7 @@ make %{?_smp_mflags}
 make install DESTDIR=%{buildroot}
 %{__mkdir_p} %{buildroot}%{_sysconfdir}/sysconfig
 %{__mkdir_p} %{buildroot}%{_sysconfdir}/rc.d/init.d
-for i in graphite-{dequeue,enqueue} ; do
+for i in graphite-{dequeue,enqueue,rewrite} ; do
 	%{__install} -m 0644 packaging/rpm/${i}.sysconfig \
 		%{buildroot}%{_sysconfdir}/sysconfig/${i}
 	%{__install} -m 0755 packaging/rpm/${i}.init \
@@ -53,6 +53,7 @@ done
 %posttrans
 /sbin/service graphite-dequeue condrestart >/dev/null 2>&1 || :
 /sbin/service graphite-enqueue condrestart >/dev/null 2>&1 || :
+/sbin/service graphite-rewrite condrestart >/dev/null 2>&1 || :
 
 %clean
 %{__rm} -rf %{buildroot}
@@ -67,5 +68,8 @@ done
 %doc %{_mandir}/man8/graphite-*.8*
 
 %changelog
+* Tue Apr 30 2013 Matt Dainty <matt@bodgit-n-scarper.com> 0.1-1.20130430gitXXXXXXXX
+- Bump to version 0.1-1.20130430gitXXXXXXXX for STOMP support.
+
 * Fri Jun 22 2012 Matt Dainty <matt@bodgit-n-scarper.com> 0.1-1.20120623gitXXXXXXXX
 - Initial version 0.1-1.20120623gitXXXXXXXX.

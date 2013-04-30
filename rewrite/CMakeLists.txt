@@ -1,7 +1,7 @@
 set(REWRITE_MANS graphite-rewrite.8 graphite-rewrite.conf.5)
 set(REWRITE_MANS_COMPRESSED graphite-rewrite.8.gz graphite-rewrite.conf.5.gz)
 
-foreach(man ${ENQUEUE_MANS})
+foreach(man ${REWRITE_MANS})
 	add_custom_command(OUTPUT ${man}.gz
 		COMMAND ${GZIP_TOOL} -c ${CMAKE_CURRENT_SOURCE_DIR}/${man} >${man}.gz
 		DEPENDS ${man}
@@ -16,7 +16,7 @@ add_executable(graphite-rewrite
 	$<TARGET_OBJECTS:common>
 	$<TARGET_OBJECTS:stomp>
 	$<TARGET_OBJECTS:graphite>
-	${ENQUEUE_MANS_COMPRESSED}
+	${REWRITE_MANS_COMPRESSED}
 )
 
 target_link_libraries(graphite-rewrite
