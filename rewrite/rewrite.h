@@ -75,6 +75,11 @@ struct rewrite {
 
 	struct graphite_connection		*stats_conn;
 	struct event				*stats_ev;
+
+	/* Stats */
+	unsigned long long			 rules;
+	unsigned long long			 metrics;
+	unsigned long long			 rewrites;
 };
 
 /* prototypes */

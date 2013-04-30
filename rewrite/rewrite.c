@@ -208,18 +208,12 @@ stats_timer_cb(int fd, short event, void *arg)
 	    "stomp.buffer.output", tv, "%zd",
 	    (env->stomp_conn->bev == NULL) ? 0 :
 	    evbuffer_get_length(bufferevent_get_output(env->stomp_conn->bev)));
-#if 0
 	stats_send_metric(env->stats_conn, env->stats_prefix,
-	    "graphite.bytes.tx", tv, "%lld", env->graphite_conn->bytes_tx);
+	    "rules", tv, "%lld", env->rules);
 	stats_send_metric(env->stats_conn, env->stats_prefix,
-	    "graphite.metrics.tx", tv, "%lld", env->graphite_conn->metrics_tx);
+	    "metrics", tv, "%lld", env->metrics);
 	stats_send_metric(env->stats_conn, env->stats_prefix,
-	    "graphite.buffer.input", tv, "%zd",
-	    evbuffer_get_length(bufferevent_get_input(env->graphite_conn->bev)));
-	stats_send_metric(env->stats_conn, env->stats_prefix,
-	    "graphite.buffer.output", tv, "%zd",
-	    evbuffer_get_length(bufferevent_get_output(env->graphite_conn->bev)));
-#endif
+	    "rewrites", tv, "%lld", env->rewrites);
 }
 
 void
@@ -271,7 +265,7 @@ stomp_message_cb(struct stomp_connection *c,
 	struct rewrite_rule	 *rule;
 	int			  rc;
 	int			  ovector[30];
-	int			  size;
+	int			  size, total;
 	char			 *new;
 
 	/* Count how many lines (metrics) are in this message */
@@ -378,42 +372,84 @@ stomp_message_cb(struct stomp_connection *c,
 		}
 
 	/* Message looks ok, apply any rewrite rules to each line */
-	for (i = j = 0; i < lines; i++) {
+	for (i = j = total = 0; i < lines; i++) {
 
 		/* Ignore completely empty lines */
 		if (strlen(line[i]) == 0)
 			continue;
 
+		/* Add a newline delimiter between lines */
+		if (total)
+			total++;
+
 		part[j + 3] = strdup(part[j + GRAPHITE_PART_METRIC]);
+
+		sub->env->metrics++;
 
 		for (rule = TAILQ_FIRST(&sub->env->rewrite_rules); rule;
 		    rule = TAILQ_NEXT(rule, entry)) {
 			if ((rc = pcre_exec(rule->re, rule->sd, part[j + 3],
 			    strlen(part[j + 3]), 0, 0, ovector, 30)) < -1) {
-				fprintf(stderr, "Match failed: %d\n", rc);
+				log_warnx("Match failed: %d", rc);
 				continue;
 			}
 			if (rc == 0) {
-				fprintf(stderr, "ovector too small\n");
+				log_warnx("ovector too small");
 				continue;
 			}
 			if (rc > 0) {
-				fprintf(stderr, "String was \"%s\"\n", part[j + 3]);
-
 				size = pcre_replace(part[j + 3], rule->replacement,
 				    ovector, rc, NULL, 0);
 				new = calloc(size + 1, sizeof(char));
 				pcre_replace(part[j + 3], rule->replacement, ovector, rc,
 				    new, size + 1);
 
-				fprintf(stderr, "String is now \"%s\"\n", new);
+				sub->env->rewrites++;
+
 				free(part[j + 3]);
 				part[j + 3] = new;
 			}
 		}
 
+		/* Track length of rewritten line */
+		total += 2 + strlen(part[j + 3]) +
+		    strlen(part[j + GRAPHITE_PART_VALUE]) +
+		    strlen(part[j + GRAPHITE_PART_TIMESTAMP]);
+
+		if (strcmp(part[j + GRAPHITE_PART_METRIC], part[j + 3]))
+			log_debug("Metric was \"%s\", is now \"%s\"",
+			    part[j + GRAPHITE_PART_METRIC], part[j + 3]);
+
 		j += 4;
 	}
+
+	/* Create new message and send it */
+	if ((new = calloc(total + 1, sizeof(char))) == NULL)
+		goto end;
+
+	for (i = j = 0; i < lines; i++) {
+
+		/* Ignore completely empty lines */
+		if (strlen(line[i]) == 0)
+			continue;
+
+		if (strlen(new))
+			strcat(new, "\n");
+
+		strcat(new, part[j + 3]);
+		strcat(new, " ");
+		strcat(new, part[j + GRAPHITE_PART_VALUE]);
+		strcat(new, " ");
+		strcat(new, part[j + GRAPHITE_PART_TIMESTAMP]);
+
+		/* Free this now we don't need it */
+		free(part[j + 3]);
+
+		j += 4;
+	}
+
+	stomp_send(sub->env->stomp_conn, sub->env->stomp_send, new, NULL);
+	free(new);
 
 	switch (sub->ack) {
 	case STOMP_ACK_CLIENT:
@@ -611,6 +647,8 @@ main(int argc, char *argv[])
 			rule = nrule;
 			continue;
 		}
+
+		env->rules++;
 
 		rule = TAILQ_NEXT(rule, entry);
 	}
