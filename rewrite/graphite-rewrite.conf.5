@@ -1,0 +1,130 @@
+.\" Copyright (c) 2013 Matt Dainty <matt@bodgit-n-scarper.com>
+.\"
+.\" Permission to use, copy, modify, and distribute this software for any
+.\" purpose with or without fee is hereby granted, provided that the above
+.\" copyright notice and this permission notice appear in all copies.
+.\"
+.\" THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+.\" WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+.\" MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+.\" ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+.\" WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+.\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+.\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+.\"
+.Dd $Mdocdate$
+.Dt GRAPHITE-REWRITE.CONF 5
+.Os
+.Sh NAME
+.Nm graphite-rewrite.conf
+.Nd graphite-rewrite daemon configuration file
+.Sh DESCRIPTION
+.Nm
+is the configuration file for the
+.Xr graphite-rewrite 8
+daemon.
+.Sh SECTIONS
+The
+.Nm
+file only has one section:
+.Bl -tag -width xxxx
+.It Sy Global Configuration
+Global runtime settings for
+.Xr graphite-rewrite 8
+.El
+.Pp
+Comments can be put anywhere in the file using a hash mark
+.Pq Sq # ,
+and extend to the end of the current line.
+.Sh GLOBAL CONFIGURATION
+The following options can be set globally:
+.Pp
+.Bl -tag -width Ds -compact
+.It Xo
+.Ic stomp Ar address
+.Op Ic port Ar number
+.Op Ic vhost Ar string
+.Op Ic user Ar string
+.Op Ic password Ar string
+.Op Ic version Ar string
+.Op Ic ssl
+.Op Ic heartbeat Ar milliseconds
+.Op Ic reconnect Ar seconds
+.Xc
+Specify the STOMP server.
+.Pp
+.It Xo
+.Ic subscribe Ar string
+.Op Ic ack Pq Ic auto Ns | Ns Ic client Ns | Ns Ic individual
+.Xc
+Specify the path(s) to subscribe to, refer to your STOMP server documentation.
+The
+.Ic ack
+option can be used to set the type of acknowledgements used.
+.Pp
+.It Xo
+.Ic rewrite Ar pattern Ar replacement
+.Xc
+Specify a rewrite rule to apply to the metric names.
+All rules are applied in order, the
+.Ar pattern
+should obey the standard PCRE rules.
+Capturing is supported, use
+.Sq \en
+notation in the
+.Ar replacement
+to refer to numbered captures.
+.Pp
+.It Xo
+.Ic send Ar string
+.Xc
+Specify the path to send messages to, refer to your STOMP server
+documentation.
+.Pp
+.It Xo
+.Ic statistics Ar address
+.Op Ic port Ar number
+.Op Ic reconnect Ar seconds
+.Op Ic interval Ar seconds
+.Op Ic prefix Ar string
+.Xc
+.Xr graphite-rewrite 8
+can periodically emit statistics to another Graphite server, see the
+.Ar graphite
+option for details.
+Use the
+.Ic interval
+option to set how often this happens.
+The
+.Ic prefix
+by default is the hostname as returned by
+.Xr gethostname 3
+with any periods replaced with underscores and appended with
+.Sq .rewrite .
+.Pp
+.El
+.Sh FILES
+.Bl -tag -width "/etc/graphite-rewrite.conf" -compact
+.It Pa /etc/graphite-rewrite.conf
+Default location of the configuration file.
+.El
+.Sh EXAMPLES
+The following example is the default options
+.Xr graphite-rewrite 8
+uses:
+.Bd -literal -offset indent
+stomp localhost port 61613 vhost "/" reconnect 10
+subscribe "/queue/graphite" ack individual
+statistics localhost port 2003 reconnect 10 interval 60 prefix $hostname.rewrite
+.Ed
+.Sh SEE ALSO
+.Xr graphite-rewrite 8 ,
+.Xr graphite-enqueue 8 ,
+.Xr graphite-enqueue.conf 5
+.Xr graphite-dequeue 8 ,
+.Xr graphite-dequeue.conf 5
+.Sh AUTHORS
+The
+.Xr graphite-rewrite 8
+program was written by
+.An Matt Dainty Aq matt@bodgit-n-scarper.com .
