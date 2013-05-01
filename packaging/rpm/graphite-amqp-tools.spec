@@ -18,6 +18,7 @@ BuildRequires	: cmake28 >= 2.8.8
 BuildRequires	: cmake >= 2.8.8
 %endif
 BuildRequires	: libevent-devel >= 2
+BuildRequires	: openssl-devel
 BuildRequires	: bison
 BuildRequires	: pcre-devel
 

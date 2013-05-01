@@ -624,8 +624,8 @@ main(int argc, char *argv[])
 	for (rule = TAILQ_FIRST(&env->rewrite_rules); rule; ) {
 		if ((rule->re = pcre_compile(rule->pattern, 0, &pcre_err,
 		    &pcre_err_offset, NULL)) == NULL) {
-			fprintf(stderr, "Compilation failed: %s, at %d\n",
-			    pcre_err, pcre_err_offset);
+			log_warnx("Compilation failed: %s, at %d\n", pcre_err,
+			    pcre_err_offset);
 			nrule = TAILQ_NEXT(rule, entry);
 			TAILQ_REMOVE(&env->rewrite_rules, rule, entry);
 			free(rule->pattern);
@@ -634,10 +634,15 @@ main(int argc, char *argv[])
 			rule = nrule;
 			continue;
 		}
-		if ((rule->sd = pcre_study(rule->re,
-		    PCRE_STUDY_EXTRA_NEEDED|PCRE_STUDY_JIT_COMPILE,
-		    &pcre_err)) == NULL) {
-			fprintf(stderr, "Study failed: %s\n", pcre_err);
+		rule->sd = pcre_study(rule->re,
+#ifdef PCRE_CONFIG_JIT
+		    PCRE_STUDY_JIT_COMPILE,
+#else
+		    0,
+#endif
+		    &pcre_err);
+		if (pcre_err) {
+			log_warnx("Study failed: %s\n", pcre_err);
 			nrule = TAILQ_NEXT(rule, entry);
 			TAILQ_REMOVE(&env->rewrite_rules, rule, entry);
 			pcre_free(rule->re);
@@ -711,7 +716,11 @@ main(int argc, char *argv[])
 	while (!TAILQ_EMPTY(&env->rewrite_rules)) {
 		rule = TAILQ_FIRST(&env->rewrite_rules);
 		TAILQ_REMOVE(&env->rewrite_rules, rule, entry);
+#ifdef PCRE_CONFIG_JIT
 		pcre_free_study(rule->sd);
+#else
+		pcre_free(rule->sd);
+#endif
 		pcre_free(rule->re);
 		free(rule->pattern);
 		free(rule->replacement);
