@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.8.8)
 
 project(graphite-amqp-tools C)
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -Wall -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations -Wshadow -Wpointer-arith -Wcast-qual -Wsign-compare")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations -Wshadow -Wpointer-arith -Wcast-qual -Wsign-compare")
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 include(FindBISON)
@@ -38,8 +38,8 @@ endif()
 set(PROJECT_VERSION "0.1")
 set(ARCHIVE_NAME ${CMAKE_PROJECT_NAME}-${PROJECT_VERSION})
 add_custom_target(dist
-	COMMAND git archive --prefix=${ARCHIVE_NAME}/ HEAD
-		| ${GZIP_TOOL} >${CMAKE_BINARY_DIR}/${ARCHIVE_NAME}.tar.gz
+	COMMAND python git-archive-all/git-archive-all --prefix=${ARCHIVE_NAME}/
+		${CMAKE_BINARY_DIR}/${ARCHIVE_NAME}.tar.gz
 	WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 include_directories(

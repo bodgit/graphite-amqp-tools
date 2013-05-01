@@ -4,3 +4,6 @@
 [submodule "graphite"]
 	path = graphite
 	url = git@github.com:bodgit/libevent-graphite.git
+[submodule "git-archive-all"]
+	path = git-archive-all
+	url = git@github.com:Kentzo/git-archive-all.git
