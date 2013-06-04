@@ -87,6 +87,10 @@ graphite_server_read(struct bufferevent *bev, void *arg)
 		client->metrics_rx++;
 		env->metrics_rx++;
 
+		/* FIXME Not connected to STOMP, drop the message */
+		if (!(env->state & ENQUEUE_STOMP_CONNECTED))
+			goto loop;
+
 		/* The metric is is in the message, no batching */
 		if (env->stomp_bytes == 0) {
 			stomp_send(env->stomp_conn, env->stomp_send, line,
@@ -309,6 +313,8 @@ stomp_connect_cb(struct stomp_connection *c, struct stomp_frame *frame,
 
 	log_debug("Connected to %s:%hu", env->stomp_host,
 	    env->stomp_port);
+
+	env->state |= ENQUEUE_STOMP_CONNECTED;
 }
 
 void
@@ -318,6 +324,15 @@ stomp_disconnect_cb(struct stomp_connection *c, void *arg)
 
 	log_debug("Disconnected from %s:%hu", env->stomp_host,
 	    env->stomp_port);
+
+	env->state &= ~(ENQUEUE_STOMP_CONNECTED);
+
+	/* Deactivate the timeout if pending */
+	if (evtimer_pending(env->ev, NULL))
+		evtimer_del(env->ev);
+
+	/* FIXME Dump the current buffer */
+	*env->buffer = '\0';
 }
 
 int
