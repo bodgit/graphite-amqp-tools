@@ -35,6 +35,8 @@
 
 #define	STOMP_DEFAULT_TIMEOUT	500
 
+#define	ENQUEUE_STOMP_CONNECTED	(1 << 0)
+
 struct listen_addr {
 	TAILQ_ENTRY(listen_addr)	 entry;
 	struct sockaddr_storage		 sa;
@@ -54,6 +56,8 @@ struct enqueue_addr_wrap {
 
 struct enqueue {
 	struct event_base			*base;
+
+	int					 state;
 
 	TAILQ_HEAD(listen_addrs, listen_addr)	 listen_addrs;
 
