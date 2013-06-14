@@ -20,12 +20,14 @@
 #include <unistd.h>
 #include <err.h>
 #include <pwd.h>
+#include <signal.h>
 
 #include "enqueue.h"
 
 #define	MAX_LINE	4096
 
 __dead void	 usage(void);
+void		 handle_signal(int, short, void *);
 void		 stomp_flush(int, short, void *);
 void		 graphite_server_read(struct bufferevent *, void *);
 void		 graphite_server_error(struct bufferevent *, short, void *);
@@ -49,6 +51,16 @@ usage(void)
 
 	fprintf(stderr, "usage: %s [-dnv] [-f file]\n", __progname);
 	exit(1);
+}
+
+void
+handle_signal(int sig, short event, void *arg)
+{
+	//struct enqueue	*env = (struct enqueue *)arg;
+
+	log_info("exiting on signal %d", sig);
+
+	exit(0);
 }
 
 void
@@ -348,6 +360,9 @@ main(int argc, char *argv[])
 	struct enqueue		*env;
 	SSL_CTX			*ctx;
 	struct listen_addr	*la, *nla;
+	struct event		*ev_sighup;
+	struct event		*ev_sigint;
+	struct event		*ev_sigterm;
 
 	log_init(1);	/* log to stderr until daemonized */
 
@@ -504,6 +519,14 @@ main(int argc, char *argv[])
 #endif
 		fatal("cannot drop privileges");
 #endif
+
+	signal(SIGPIPE, SIG_IGN);
+	ev_sighup = evsignal_new(env->base, SIGHUP, handle_signal, env);
+	ev_sigint = evsignal_new(env->base, SIGINT, handle_signal, env);
+	ev_sigterm = evsignal_new(env->base, SIGTERM, handle_signal, env);
+	evsignal_add(ev_sighup, NULL);
+	evsignal_add(ev_sigint, NULL);
+	evsignal_add(ev_sigterm, NULL);
 
 	graphite_connect(env->stats_conn);
 	stomp_connect(env->stomp_conn);

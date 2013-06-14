@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <err.h>
 #include <pwd.h>
+#include <signal.h>
 
 #include <event2/bufferevent.h>
 #include <event2/buffer.h>
@@ -26,6 +27,7 @@
 #include "dequeue.h"
 
 __dead void	 usage(void);
+void		 handle_signal(int, short, void *);
 void		 check_state(struct dequeue *);
 void		 graphite_connect_cb(struct graphite_connection *, void *);
 void		 graphite_disconnect_cb(struct graphite_connection *, void *);
@@ -48,6 +50,16 @@ usage(void)
 
 	fprintf(stderr, "usage: %s [-dnv] [-f file]\n", __progname);
 	exit(1);
+}
+
+void
+handle_signal(int sig, short event, void *arg)
+{
+	//struct dequeue	*env = (struct dequeue *)arg;
+
+	log_info("exiting on signal %d", sig);
+
+	exit(0);
 }
 
 void
@@ -400,6 +412,9 @@ main(int argc, char *argv[])
 	struct dequeue		 *env;
 	SSL_CTX			 *ctx;
 	struct stomp_sub	 *sub;
+	struct event		 *ev_sighup;
+	struct event		 *ev_sigint;
+	struct event		 *ev_sigterm;
 
 	log_init(1);	/* log to stderr until daemonized */
 
@@ -520,6 +535,14 @@ main(int argc, char *argv[])
 #endif
 		fatal("cannot drop privileges");
 #endif
+
+	signal(SIGPIPE, SIG_IGN);
+	ev_sighup = evsignal_new(env->base, SIGHUP, handle_signal, env);
+	ev_sigint = evsignal_new(env->base, SIGINT, handle_signal, env);
+	ev_sigterm = evsignal_new(env->base, SIGTERM, handle_signal, env);
+	evsignal_add(ev_sighup, NULL);
+	evsignal_add(ev_sigint, NULL);
+	evsignal_add(ev_sigterm, NULL);
 
 	graphite_connect(env->graphite_conn);
 	graphite_connect(env->stats_conn);
