@@ -32,8 +32,6 @@ void		 check_state(struct dequeue *);
 void		 graphite_connect_cb(struct graphite_connection *, void *);
 void		 graphite_disconnect_cb(struct graphite_connection *, void *);
 void		 stats_connect_cb(struct graphite_connection *, void *);
-void		 stats_send_metric(struct graphite_connection *, char *,
-		    char *, struct timeval, char *, ...);
 void		 stats_timer_cb(int, short, void *);
 void		 stats_disconnect_cb(struct graphite_connection *, void *);
 void		 stomp_connect_cb(struct stomp_connection *,
@@ -121,40 +119,6 @@ stats_connect_cb(struct graphite_connection *c, void *arg)
 }
 
 void
-stats_send_metric(struct graphite_connection *c, char *prefix, char *metric,
-    struct timeval tv, char *format, ...)
-{
-	char	 buffer[1024];
-	char	*m, *v, *t;
-	size_t	 size, length;
-	va_list	 ap;
-
-	length = 1024;
-	va_start(ap, format);
-
-	m = buffer;
-	if ((size = snprintf(m, length, "%s.%s", prefix, metric)) >= length)
-		goto bad;
-	length -= size + 1;
-
-	v = m + size + 1;
-	if ((size = vsnprintf(v, length, format, ap)) >= length)
-		goto bad;
-	length -= size + 1;
-
-	t = v + size + 1;
-	if ((size = snprintf(t, length, "%ld", tv.tv_sec)) >= length)
-		goto bad;
-
-	va_end(ap);
-	graphite_send(c, m, v, t);
-	return;
-bad:
-	va_end(ap);
-	log_warnx("Insufficient space to render metric");
-}
-
-void
 stats_timer_cb(int fd, short event, void *arg)
 {
 	struct dequeue	*env = (struct dequeue *)arg;
@@ -163,35 +127,35 @@ stats_timer_cb(int fd, short event, void *arg)
 	gettimeofday(&tv, NULL);
 
 	/* FIXME shouldn't really be poking inside structs */
-	stats_send_metric(env->stats_conn, env->stats_prefix,
+	graphite_send_metric(env->stats_conn, env->stats_prefix,
 	    "stomp.bytes.rx", tv, "%lld", env->stomp_conn->bytes_rx);
-	stats_send_metric(env->stats_conn, env->stats_prefix,
+	graphite_send_metric(env->stats_conn, env->stats_prefix,
 	    "stomp.bytes.tx", tv, "%lld", env->stomp_conn->bytes_tx);
-	stats_send_metric(env->stats_conn, env->stats_prefix,
+	graphite_send_metric(env->stats_conn, env->stats_prefix,
 	    "stomp.messages.rx", tv, "%lld", env->stomp_conn->messages_rx);
-	stats_send_metric(env->stats_conn, env->stats_prefix,
+	graphite_send_metric(env->stats_conn, env->stats_prefix,
 	    "stomp.messages.tx", tv, "%lld", env->stomp_conn->messages_tx);
-	stats_send_metric(env->stats_conn, env->stats_prefix,
+	graphite_send_metric(env->stats_conn, env->stats_prefix,
 	    "stomp.frames.rx", tv, "%lld", env->stomp_conn->frames_rx);
-	stats_send_metric(env->stats_conn, env->stats_prefix,
+	graphite_send_metric(env->stats_conn, env->stats_prefix,
 	    "stomp.frames.tx", tv, "%lld", env->stomp_conn->frames_tx);
-	stats_send_metric(env->stats_conn, env->stats_prefix,
+	graphite_send_metric(env->stats_conn, env->stats_prefix,
 	    "stomp.buffer.input", tv, "%zd",
 	    (env->stomp_conn->bev == NULL) ? 0 :
 	    evbuffer_get_length(bufferevent_get_input(env->stomp_conn->bev)));
-	stats_send_metric(env->stats_conn, env->stats_prefix,
+	graphite_send_metric(env->stats_conn, env->stats_prefix,
 	    "stomp.buffer.output", tv, "%zd",
 	    (env->stomp_conn->bev == NULL) ? 0 :
 	    evbuffer_get_length(bufferevent_get_output(env->stomp_conn->bev)));
-	stats_send_metric(env->stats_conn, env->stats_prefix,
+	graphite_send_metric(env->stats_conn, env->stats_prefix,
 	    "graphite.bytes.tx", tv, "%lld", env->graphite_conn->bytes_tx);
-	stats_send_metric(env->stats_conn, env->stats_prefix,
+	graphite_send_metric(env->stats_conn, env->stats_prefix,
 	    "graphite.metrics.tx", tv, "%lld", env->graphite_conn->metrics_tx);
-	stats_send_metric(env->stats_conn, env->stats_prefix,
+	graphite_send_metric(env->stats_conn, env->stats_prefix,
 	    "graphite.buffer.input", tv, "%zd",
 	    (env->graphite_conn->bev == NULL) ? 0 :
 	    evbuffer_get_length(bufferevent_get_input(env->graphite_conn->bev)));
-	stats_send_metric(env->stats_conn, env->stats_prefix,
+	graphite_send_metric(env->stats_conn, env->stats_prefix,
 	    "graphite.buffer.output", tv, "%zd",
 	    (env->graphite_conn->bev == NULL) ? 0 :
 	    evbuffer_get_length(bufferevent_get_output(env->graphite_conn->bev)));
@@ -506,6 +470,7 @@ main(int argc, char *argv[])
 		fatalx("stomp_init");
 	if ((env->stomp_conn = stomp_connection_new(env->stomp_host,
 	    env->stomp_port, env->stomp_version, env->stomp_vhost,
+	    env->stomp_user, env->stomp_password,
 	    (env->stomp_flags & STOMP_FLAG_SSL) ? ctx : NULL,
 	    env->stomp_reconnect, env->stomp_heartbeat,
 	    env->stomp_heartbeat)) == NULL)
