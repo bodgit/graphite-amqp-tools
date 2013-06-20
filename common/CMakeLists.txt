@@ -1,1 +1,1 @@
-add_library(common OBJECT log.c strtonum.c)
+add_library(common OBJECT common.c log.c strtonum.c)

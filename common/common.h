@@ -57,6 +57,10 @@
 #endif
 
 /* prototypes */
+/* common.c */
+int		 merge_nth_string(char *, char, char *, int,
+		    char *(*nth_string)(int, void *), void *);
+
 /* log.c */
 void		 log_init(int);
 void		 vlog(int, const char *, va_list);
