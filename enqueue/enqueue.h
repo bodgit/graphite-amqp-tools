@@ -79,6 +79,7 @@ struct enqueue {
 	long long				 stomp_timeout;
 
 	char					*buffer;
+	char					*destination;
 	struct event				*ev;
 	struct timeval				 t;
 

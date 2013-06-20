@@ -29,6 +29,7 @@
 __dead void	 usage(void);
 void		 handle_signal(int, short, void *);
 void		 stomp_flush(int, short, void *);
+char		*graphite_nth_label(int, void *);
 void		 graphite_server_read(struct bufferevent *, void *);
 void		 graphite_server_error(struct bufferevent *, short, void *);
 void		 graphite_server_count_rx(struct evbuffer *,
@@ -70,8 +71,37 @@ stomp_flush(int fd, short event, void *arg)
 
 	/* Send what's in the buffer and zero it */
 	if (strlen(env->buffer) > 0)
-		stomp_send(env->stomp_conn, env->stomp_send, env->buffer, NULL);
+		stomp_send(env->stomp_conn, env->destination, env->buffer,
+		    NULL);
 	*env->buffer = '\0';
+	free(env->destination);
+}
+
+char *
+graphite_nth_label(int n, void *arg)
+{
+	char	*metric = (char *)arg;
+	char	*token, *string, *tofree, *label = NULL;
+	int	 i;
+
+	if (n < 1)
+		return (NULL);
+
+	tofree = string = strdup(metric);
+
+	i = 0;
+	while ((token = strsep(&string, ".")) != NULL) {
+		i++;
+		if (i == n)
+			break;
+	}
+
+	if (token != NULL)
+		label = strdup(token);
+
+	free(tofree);
+
+	return (label);
 }
 
 void
@@ -84,6 +114,7 @@ graphite_server_read(struct bufferevent *bev, void *arg)
 	char		*line;
 	size_t		 n;
 	int		 len;
+	char		*metric, *destination;
 
 	input = bufferevent_get_input(bev);
 	output = bufferevent_get_output(bev);
@@ -101,10 +132,29 @@ graphite_server_read(struct bufferevent *bev, void *arg)
 		if (!(env->state & ENQUEUE_STOMP_CONNECTED))
 			goto loop;
 
+		/* Work out the destination path, first take a copy of the
+		 * metric
+		 */
+		metric = strndup(line, len);
+		
+		/* Create the transformed destination using the metric */
+		if ((len = merge_nth_string(env->stomp_send, '$', NULL, 0,
+		    graphite_nth_label, (void *)metric)) < 0) {
+			log_warnx("merging %s with %s failed",
+			    env->stomp_send, metric);
+			free(metric);
+			goto loop;
+		}
+		destination = calloc(len + 1, sizeof(char));
+		merge_nth_string(env->stomp_send, '$', destination, len + 1,
+		    graphite_nth_label, (void *)metric);
+
+		free(metric);
+
 		/* The metric is is in the message, no batching */
 		if (env->stomp_bytes == 0) {
-			stomp_send(env->stomp_conn, env->stomp_send, line,
-			    NULL);
+			stomp_send(env->stomp_conn, destination, line, NULL);
+			free(destination);
 			goto loop;
 		}
 
@@ -114,11 +164,16 @@ graphite_server_read(struct bufferevent *bev, void *arg)
 
 		/* Existing data in the buffer? */
 		if (strlen(env->buffer) > 0) {
-			if ((strlen(env->buffer) + 1 + strlen(line)) > env->stomp_bytes) {
-				/* Send what we have */
-				stomp_send(env->stomp_conn, env->stomp_send,
+			if (strcmp(destination, env->destination) ||
+			    (strlen(env->buffer) + 1 + strlen(line)) > env->stomp_bytes) {
+				/* Batched metrics have a different destination
+				 * to the current metric or buffer would exceed
+				 * size, send what we have
+				 */
+				stomp_send(env->stomp_conn, env->destination,
 				    env->buffer, NULL);
 				*env->buffer = '\0';
+				free(env->destination);
 			} else {
 				/* Append a newline and the latest metric */
 				strcat(env->buffer, "\n");
@@ -127,6 +182,8 @@ graphite_server_read(struct bufferevent *bev, void *arg)
 				/* Set the timeout timer */
 				evtimer_add(env->ev, &env->t);
 
+				free(destination);
+
 				goto loop;
 			}
 		}
@@ -134,11 +191,14 @@ graphite_server_read(struct bufferevent *bev, void *arg)
 		if (strlen(line) > env->stomp_bytes) {
 			/* Numpty has set the batch size too low */
 			log_warnx("batch size is set too low");
-			stomp_send(env->stomp_conn, env->stomp_send, line,
-			    NULL);
+			stomp_send(env->stomp_conn, destination, line, NULL);
+			free(destination);
 		} else {
 			/* Set the buffer to this new metric */
 			strcpy(env->buffer, line);
+
+			/* Remember the destination */
+			env->destination = destination;
 
 			/* Set the timeout timer */
 			evtimer_add(env->ev, &env->t);
@@ -309,6 +369,7 @@ stomp_disconnect_cb(struct stomp_connection *c, void *arg)
 
 	/* FIXME Dump the current buffer */
 	*env->buffer = '\0';
+	free(env->destination);
 }
 
 int

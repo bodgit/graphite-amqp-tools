@@ -69,6 +69,10 @@ Specify the source STOMP server.
 .Xc
 Specify the path(s) to send messages to, refer to your STOMP server
 documentation.
+You can use
+.Sq $n
+notation to substitute the nth label of the current metric into the path.
+If the nth label doesn't exist for a metric, it will be dropped.
 .Pp
 .It Xo
 .Ic message-size Ar bytes
@@ -86,6 +90,7 @@ option to override the default timeout of 500 milliseconds for sending
 messages with less than
 .Ar bytes
 of payload.
+Only messages with the same destination path will be batched.
 .Pp
 .It Xo
 .Ic statistics Ar address
