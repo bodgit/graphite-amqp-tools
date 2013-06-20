@@ -26,9 +26,16 @@
 
 #include "rewrite.h"
 
+/* Used for passing all the necessary args to pcre_nth_match() */
+struct pcre_nth_match_args {
+	char	*subject;
+	int	*ovector;
+	int	 stringcount;
+};
+
 __dead void	 usage(void);
 void		 handle_signal(int, short, void *);
-int		 pcre_replace(char *, char *, int *, int, char *, int);
+char		*pcre_nth_match(int, void *);
 void		 stats_connect_cb(struct graphite_connection *, void *);
 void		 stats_timer_cb(int, short, void *);
 void		 stats_disconnect_cb(struct graphite_connection *, void *);
@@ -58,90 +65,25 @@ handle_signal(int sig, short event, void *arg)
 	exit(0);
 }
 
-int
-pcre_replace(char *subject, char *replacement, int *ovector, int stringcount,
-    char *buffer, int buffersize)
+char *
+pcre_nth_match(int n, void *arg)
 {
-	int		 total = ovector[0], len;
-	char		*ptr = buffer, *p1, *p2, *num;
-	long long	 ss;
-	size_t		 size;
+	struct pcre_nth_match_args	*args = (struct pcre_nth_match_args *)arg;
+	int				 len;
+	char				*match;
 
-	/* Allow for the extra storage for the trailing null */
-	if (buffersize)
-		buffersize--;
+	/* Substring is out of bounds */
+	if (n >= args->stringcount)
+		return (NULL);
 
-	/* Copy any characters before the match */
-	if (ptr) {
-		len = MIN(buffersize, ovector[0]);
-		strncpy(ptr, subject, len);
-		ptr += len;
-		buffersize -= len;
-	}
+	len = args->ovector[(n << 1) + 1] - args->ovector[n << 1];
+	if ((match = calloc(len + 1, sizeof(char))) == NULL)
+		return (NULL);
 
-	/* Loop through the replacement string looking for backslashes */
-	p1 = p2 = replacement;
-	while ((p1 = strchr(p1, '\\')) != NULL) {
-		/* Copy any characters in the replacement before the backslash */
-		if (ptr) {
-			len = MIN(buffersize, p1 - p2);
-			strncpy(ptr, p2, len);
-			ptr += len;
-			buffersize -= len;
-		}
-		total += p1 - p2;
-		p1++;
-		/* Get the substring number */
-		if ((size = strspn(p1, "0123456789")) == 0)
-			return (-1);
-		if ((num = calloc(size + 1, sizeof(char))) == NULL)
-			return (-1);
-		strncpy(num, p1, size);
-		if ((ss = strtonum(num, 1, 10, NULL)) == 0) {
-			free(num);
-			return (-1);
-		}
-		free(num);
-		/* Substring is out of bounds */
-		if (ss >= stringcount)
-			return (-1);
-		len = ovector[(ss << 1) + 1] - ovector[ss << 1];
-		total += len;
-		/* pcre_copy_substring won't do a partial copy */
-		if ((num = calloc(len + 1, sizeof(char))) == NULL)
-			return (-1);
-		pcre_copy_substring(subject, ovector, stringcount, ss, num, len + 1);
-		if (ptr) {
-			len = MIN(buffersize, (int)strlen(num));
-			strncpy(ptr, num, len);
-			ptr += len;
-			buffersize -= len;
-		}
-		free(num);
-		p1 += size;
-		p2 = p1;
-	}
-	total += strlen(p2);
+	pcre_copy_substring(args->subject, args->ovector, args->stringcount,
+	    n, match, len + 1);
 
-	/* Copy any characters in the replacement after the substring */
-	if (ptr) {
-		len = MIN(buffersize, (int)strlen(p2));
-		strncpy(ptr, p2, len);
-		ptr += len;
-		buffersize -= len;
-	}
-
-	/* Copy any characters after the match */
-	if (ovector[1] < (int)strlen(subject)) {
-		total += strlen(subject) - ovector[1];
-		if (ptr) {
-			len = MIN(buffersize, (int)strlen(subject + ovector[1]));
-			strncpy(ptr, subject + ovector[1], len);
-			buffersize -= len;
-		}
-	}
-
-	return (total);
+	return (match);
 }
 
 void
@@ -231,18 +173,19 @@ stomp_message_cb(struct stomp_connection *c,
     struct stomp_subscription *subscription, struct stomp_frame *frame,
     void *arg)
 {
-	struct stomp_sub	 *sub = (struct stomp_sub *)arg;
-	struct stomp_header	 *header;
-	char			 *ptr;
-	int			  i, j, lines;
-	char			**line;
-	size_t			  len;
-	char			**part;
-	struct rewrite_rule	 *rule;
-	int			  rc;
-	int			  ovector[30];
-	int			  size, total;
-	char			 *new;
+	struct stomp_sub		 *sub = (struct stomp_sub *)arg;
+	struct stomp_header		 *header;
+	char				 *ptr;
+	int				  i, j, lines;
+	char				**line;
+	size_t				  len;
+	char				**part;
+	struct rewrite_rule		 *rule;
+	int				  rc;
+	int				  ovector[30];
+	int				  size, total;
+	char				 *new;
+	struct pcre_nth_match_args	  args;
 
 	/* Count how many lines (metrics) are in this message */
 	lines = 1;
@@ -374,11 +317,40 @@ stomp_message_cb(struct stomp_connection *c,
 				continue;
 			}
 			if (rc > 0) {
+#if 0
 				size = pcre_replace(part[j + 3], rule->replacement,
 				    ovector, rc, NULL, 0);
 				new = calloc(size + 1, sizeof(char));
 				pcre_replace(part[j + 3], rule->replacement, ovector, rc,
 				    new, size + 1);
+#endif
+				args.subject = part[j + 3];
+				args.ovector = ovector;
+				args.stringcount = rc;
+
+				size = merge_nth_string(rule->replacement,
+				    '\\', NULL, 0, pcre_nth_match,
+				    (void *)&args);
+
+				/* Include any characters before and after
+				 * the match
+				 */
+				size += ovector[0];
+				if (ovector[1] < (int)strlen(part[j + 3]))
+					size += strlen(part[j + 3]) - ovector[1];
+
+				new = calloc(size + 1, sizeof(char));
+
+				/* Copy any characters before the match */
+				strncat(new, part[j + 3], ovector[0]);
+
+				merge_nth_string(rule->replacement, '\\',
+				    new + ovector[0], size + 1 - ovector[0],
+				    pcre_nth_match, (void *)&args);
+
+				/* Copy any characters after the match */
+				if (ovector[1] < (int)strlen(part[j + 3]))
+					strcat(new, part[j + 3] + ovector[1]);
 
 				sub->env->rewrites++;
 
@@ -667,37 +639,6 @@ main(int argc, char *argv[])
 
 	graphite_connect(env->stats_conn);
 	stomp_connect(env->stomp_conn);
-
-#if 0
-	/* A typical verbose collectd metric converted to graphite */
-	subject = strdup("server_example_com.cpu.0.cpu.idle.value");
-
-	for (rule = TAILQ_FIRST(&env->rewrite_rules); rule;
-	    rule = TAILQ_NEXT(rule, entry)) {
-		if ((rc = pcre_exec(rule->re, rule->sd, subject,
-		    strlen(subject), 0, 0, ovector, 30)) < -1) {
-			fprintf(stderr, "Match failed: %d\n", rc);
-			continue;
-		}
-		if (rc == 0) {
-			fprintf(stderr, "ovector too small\n");
-			continue;
-		}
-		if (rc > 0) {
-			fprintf(stderr, "String was \"%s\"\n", subject);
-
-			size = pcre_replace(subject, rule->replacement,
-			    ovector, rc, NULL, 0);
-			new = calloc(size + 1, sizeof(char));
-			pcre_replace(subject, rule->replacement, ovector, rc,
-			    new, size + 1);
-
-			fprintf(stderr, "String is now \"%s\"\n", new);
-			free(subject);
-			subject = new;
-		}
-	}
-#endif
 
 	event_base_dispatch(env->base);
 
