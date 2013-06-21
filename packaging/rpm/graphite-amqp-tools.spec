@@ -1,6 +1,6 @@
 Name		: graphite-amqp-tools
 Version		: 0.1
-Release		: 2.20130430gitXXXXXXXX
+Release		: 3.20130621gitXXXXXXXX
 Summary		: Graphite AMQP Tools
 Group		: Applications/Internet
 
