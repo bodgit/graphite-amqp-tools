@@ -1,6 +1,6 @@
 Name		: graphite-amqp-tools
 Version		: 0.1
-Release		: 3.20130621gitXXXXXXXX
+Release		: 4.20130621gitXXXXXXXX
 Summary		: Graphite AMQP Tools
 Group		: Applications/Internet
 
@@ -61,8 +61,8 @@ done
 
 %files
 %defattr(-,root,root)
-%config %attr(0640,-,-) %{_sysconfdir}/graphite-*.conf
-%config %{_sysconfdir}/sysconfig/graphite-*
+%config(noreplace) %attr(0640,-,-) %{_sysconfdir}/graphite-*.conf
+%config(noreplace) %{_sysconfdir}/sysconfig/graphite-*
 %{_sysconfdir}/rc.d/init.d/graphite-*
 %{_sbindir}/graphite-*
 %doc %{_mandir}/man5/graphite-*.5*
