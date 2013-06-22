@@ -70,11 +70,13 @@ stomp_flush(int fd, short event, void *arg)
 	log_debug("timeout fired");
 
 	/* Send what's in the buffer and zero it */
-	if (strlen(env->buffer) > 0)
+	if (strlen(env->buffer) > 0) {
 		stomp_send(env->stomp_conn, env->destination, env->buffer,
 		    NULL);
-	*env->buffer = '\0';
-	free(env->destination);
+		*env->buffer = '\0';
+		free(env->destination);
+		env->destination = NULL;
+	}
 }
 
 char *
@@ -174,6 +176,7 @@ graphite_server_read(struct bufferevent *bev, void *arg)
 				    env->buffer, NULL);
 				*env->buffer = '\0';
 				free(env->destination);
+				env->destination = NULL;
 			} else {
 				/* Append a newline and the latest metric */
 				strcat(env->buffer, "\n");
@@ -369,7 +372,10 @@ stomp_disconnect_cb(struct stomp_connection *c, void *arg)
 
 	/* FIXME Dump the current buffer */
 	*env->buffer = '\0';
-	free(env->destination);
+	if (env->destination) {
+		free(env->destination);
+		env->destination = NULL;
+	}
 }
 
 int
